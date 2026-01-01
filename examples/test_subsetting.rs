@@ -1,6 +1,6 @@
 //! Test example for font subsetting functionality
 
-use genpdfi::subsetting::subset_font;
+use genpdfi_extended::subsetting::subset_font;
 use std::fs;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

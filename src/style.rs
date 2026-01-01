@@ -10,7 +10,7 @@
 //! # Example
 //!
 //! ```
-//! use genpdfi::style;
+//! use genpdfi_extended::style;
 //! let style = style::Style::new().bold();
 //! let ss1 = style::StyledStr::new("bold", style, None);
 //! let ss2 = style::StyledStr::new("red", style::Color::Rgb(255, 0, 0), None);
@@ -40,9 +40,9 @@ use crate::Mm;
 /// # Examples
 ///
 /// ```
-/// let red = genpdfi::style::Color::Rgb(255, 0, 0);
-/// let cyan = genpdfi::style::Color::Cmyk(255, 0, 0, 0);
-/// let grey = genpdfi::style::Color::Greyscale(127);
+/// let red = genpdfi_extended::style::Color::Rgb(255, 0, 0);
+/// let cyan = genpdfi_extended::style::Color::Cmyk(255, 0, 0, 0);
+/// let grey = genpdfi_extended::style::Color::Greyscale(127);
 /// ```
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Color {
@@ -110,6 +110,9 @@ pub struct Style {
     color: Option<Color>,
     is_bold: bool,
     is_italic: bool,
+    /// Optional font override for special rendering contexts (e.g., code blocks in monospace).
+    /// This is used to render specific text with a different font than the document default.
+    font_override: Option<fonts::FontFamily<fonts::Font>>,
 }
 
 impl Style {
@@ -135,6 +138,9 @@ impl Style {
         }
         if style.is_italic {
             self.is_italic = true;
+        }
+        if let Some(font_override) = style.font_override {
+            self.font_override = Some(font_override);
         }
     }
 
@@ -240,6 +246,22 @@ impl Style {
         self
     }
 
+    /// Sets the font override for this style.
+    pub fn set_font_override(&mut self, font_override: fonts::FontFamily<fonts::Font>) {
+        self.font_override = Some(font_override);
+    }
+
+    /// Sets the font override for this style and returns it.
+    pub fn with_font_override(mut self, font_override: fonts::FontFamily<fonts::Font>) -> Style {
+        self.set_font_override(font_override);
+        self
+    }
+
+    /// Returns the font override for this style, if set.
+    pub fn font_override(&self) -> Option<fonts::FontFamily<fonts::Font>> {
+        self.font_override
+    }
+
     /// Calculates the width of the given character with this style using the data in the given
     /// font cache.
     ///
@@ -280,7 +302,8 @@ impl Style {
     ///
     /// [`FontCache`]: ../fonts/struct.FontCache.html
     pub fn font_family(&self, font_cache: &fonts::FontCache) -> fonts::FontFamily<fonts::Font> {
-        self.font_family
+        self.font_override
+            .or(self.font_family)
             .unwrap_or_else(|| font_cache.default_font_family())
     }
 
@@ -318,6 +341,20 @@ impl Style {
     /// cache.
     ///
     /// If the font family is set, it must have been created by the given [`FontCache`][].
+    ///
+    /// # Example
+    /// ```
+    /// use genpdfi_extended::style::Style;
+    /// use genpdfi_extended::fonts::{FontData, FontFamily, FontCache};
+    /// let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+    /// let fd = FontData::new(data, None).expect("font data");
+    /// let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+    /// let cache = FontCache::new(family);
+    /// let style = Style::new().with_font_family(cache.default_font_family());
+    /// let w = style.text_width(&cache, "abc");
+    /// use genpdfi_extended::Mm;
+    /// assert!(w > Mm::from(0.0));
+    /// ```
     ///
     /// [`FontCache`]: ../fonts/struct.FontCache.html
     pub fn text_width(&self, font_cache: &fonts::FontCache, s: &str) -> Mm {
@@ -369,7 +406,7 @@ impl<T: Into<Style>> iter::FromIterator<T> for Style {
 /// # Example
 ///
 /// ```
-/// use genpdfi::style;
+/// use genpdfi_extended::style;
 /// let ss1 = style::StyledString::new("bold".to_owned(), style::Effect::Bold, None);
 /// let ss2 = style::StyledString::new("red".to_owned(), style::Color::Rgb(255, 0, 0), None);
 /// ```
@@ -435,7 +472,7 @@ impl<'a> From<&'a str> for StyledString {
 /// # Example
 ///
 /// ```
-/// use genpdfi::style;
+/// use genpdfi_extended::style;
 /// let ss1 = style::StyledStr::new("bold", style::Effect::Bold, None);
 /// let ss2 = style::StyledStr::new("red", style::Color::Rgb(255, 0, 0), None);
 /// ```
@@ -488,7 +525,90 @@ impl<'s> From<&'s String> for StyledStr<'s> {
 
 impl<'s> From<&'s StyledString> for StyledStr<'s> {
     fn from(s: &'s StyledString) -> StyledStr<'s> {
-        StyledStr::new(&s.s, s.style, s.link.as_deref())
+        StyledStr::new(&s.s, s.style.clone(), s.link.as_deref())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fonts::{self, FontCache, FontData, FontFamily};
+    use std::path::PathBuf;
+
+    fn find_font_path() -> Option<PathBuf> {
+        // Prefer bundled test fonts in `testdata/` for reproducible tests.
+        if let Ok(entries) = std::fs::read_dir("fonts") {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                    if ext.eq_ignore_ascii_case("ttf") || ext.eq_ignore_ascii_case("otf") {
+                        return Some(p);
+                    }
+                }
+            }
+        }
+
+        // Fallback to known system locations for environments that don't have testdata.
+        let candidates = [
+            PathBuf::from("tests/fonts/NotoSans.ttf"),
+            PathBuf::from("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+            PathBuf::from("/System/Library/Fonts/Helvetica.ttc"),
+            PathBuf::from("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+        ];
+        for p in &candidates {
+            if p.exists() {
+                return Some(p.clone());
+            }
+        }
+        None
+    }
+
+    fn setup_font_cache() -> Option<(FontCache, fonts::FontFamily<fonts::Font>)> {
+        let path = find_font_path()?;
+        let data = std::fs::read(&path).ok()?;
+        let fd = FontData::new(data, None).ok()?;
+        let family_data = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
+        let mut cache = FontCache::new(family_data.clone());
+        let override_family = cache.add_font_family(family_data);
+        Some((cache, override_family))
+    }
+
+    #[test]
+    fn test_set_and_get_font_override() {
+        if let Some((_cache, override_family)) = setup_font_cache() {
+            let mut s = Style::new();
+            s.set_font_override(override_family);
+            assert_eq!(s.font_override(), Some(override_family));
+        } else {
+            eprintln!("Skipping test_set_and_get_font_override: no font available");
+        }
+    }
+
+    #[test]
+    fn test_with_font_override_chain() {
+        if let Some((_cache, override_family)) = setup_font_cache() {
+            let s = Style::new().with_font_override(override_family);
+            assert_eq!(s.font_override(), Some(override_family));
+        } else {
+            eprintln!("Skipping test_with_font_override_chain: no font available");
+        }
+    }
+
+    #[test]
+    fn test_effective_font_respects_override() {
+        if let Some((cache, override_family)) = setup_font_cache() {
+            let s = Style::new().with_font_override(override_family);
+            assert_eq!(s.font_family(&cache), override_family);
+            let expected = override_family.get(s);
+            assert_eq!(s.font(&cache), expected);
+        } else {
+            eprintln!("Skipping test_effective_font_respects_override: no font available");
+        }
     }
 }
 
@@ -497,7 +617,7 @@ impl<'s> From<&'s StyledString> for StyledStr<'s> {
 /// # Example
 ///
 /// ```
-/// use genpdfi::style;
+/// use genpdfi_extended::style;
 /// let ss1 = style::StyledCow::new("bold", style::Effect::Bold, None);
 /// let ss2 = style::StyledCow::new("red".to_owned(), style::Color::Rgb(255, 0, 0), None);
 /// ```

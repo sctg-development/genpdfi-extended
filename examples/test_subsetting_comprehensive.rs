@@ -1,7 +1,7 @@
 //! Comprehensive test for subsetting with Unicode support
 //! Based on history.md achievements
 
-use genpdfi::subsetting::subset_font;
+use genpdfi_extended::subsetting::subset_font;
 
 fn main() {
     // Test data from history.md - 8+ writing systems

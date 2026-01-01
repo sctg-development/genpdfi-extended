@@ -188,3 +188,57 @@ impl<I: Iterator<Item = style::StyledString>> Iterator for Words<I> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::style::{StyledString, Style};
+    use crate::Context;
+    use crate::fonts::{self, FontData, FontFamily, FontCache};
+    use std::path::PathBuf;
+
+    fn find_test_font() -> Option<PathBuf> {
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let td = manifest.join("testdata");
+        if let Ok(entries) = std::fs::read_dir(&td) {
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if let Some(ext) = p.extension().and_then(|s| s.to_str()) {
+                    if ext.eq_ignore_ascii_case("ttf") || ext.eq_ignore_ascii_case("otf") {
+                        return Some(p);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn test_words_iterator_splits_on_space() {
+        let input = vec![StyledString::new("Hello world!".to_owned(), Style::new(), None)];
+        let mut words = Words::new(input.into_iter());
+        let w1 = words.next().unwrap();
+        assert_eq!(w1.s, "Hello ");
+        let w2 = words.next().unwrap();
+        assert_eq!(w2.s, "world!");
+        assert!(words.next().is_none());
+    }
+
+    #[test]
+    fn test_wrapper_overflow_sets_flag() {
+        // Build a context with a real font to get realistic widths
+        // Use bundled test font bytes from the `fonts/` directory to avoid runtime path issues
+        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let fd = FontData::new(data, None).expect("font data");
+        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let cache = FontCache::new(family);
+        let context = Context::new(cache);
+
+        let binding = "a".repeat(200);
+        let long_word = style::StyledStr::new(&binding, Style::new(), None);
+        let mut wrapper = Wrapper::new(std::iter::once(long_word), &context, Mm(0.1));
+        assert!(wrapper.next().is_none());
+        assert!(wrapper.has_overflowed());
+    }
+}
+

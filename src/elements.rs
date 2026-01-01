@@ -81,7 +81,7 @@ impl IntoBoxedElement for Box<dyn Element> {
 ///
 /// With setters:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let mut layout = elements::LinearLayout::vertical();
 /// layout.push(elements::Paragraph::new("Test1"));
 /// layout.push(elements::Paragraph::new("Test2"));
@@ -89,7 +89,7 @@ impl IntoBoxedElement for Box<dyn Element> {
 ///
 /// Chained:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let layout = elements::LinearLayout::vertical()
 ///     .element(elements::Paragraph::new("Test1"))
 ///     .element(elements::Paragraph::new("Test2"));
@@ -166,6 +166,158 @@ impl<E: IntoBoxedElement> iter::Extend<E> for LinearLayout {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::style::Style;
+    use crate::Margins;
+    use crate::render::Renderer;
+
+    // Dummy element used for testing constructors and push methods without invoking rendering
+    #[derive(Clone, Debug)]
+    struct Dummy;
+    impl Element for Dummy {
+        fn render(
+            &mut self,
+            _context: &Context,
+            _area: render::Area<'_>,
+            _style: Style,
+        ) -> Result<RenderResult, Error> {
+            Ok(RenderResult::default())
+        }
+    }
+
+    #[test]
+    fn test_into_boxed_element_for_text_and_box() {
+        let t = Text::new("hello");
+        let _boxed: Box<dyn Element> = t.into_boxed_element();
+        let b: Box<dyn Element> = Box::new(Dummy);
+        let _same: Box<dyn Element> = b.into_boxed_element();
+    }
+
+    #[test]
+    fn test_linear_layout_push_and_extend_compile() {
+        let mut layout = LinearLayout::vertical();
+        layout.push(Text::new("a"));
+        // extend with iterator
+        layout.extend(vec![Text::new("b"), Text::new("c")]);
+    }
+
+    #[test]
+    fn test_paragraph_builders() {
+        let mut p = Paragraph::new("start");
+        p.set_alignment(Alignment::Left);
+        p.push("middle");
+        p.push_styled("styled", Style::new());
+        p.push_link("link", "http://example.com", Style::new());
+        let _ = p.clone().aligned(Alignment::Center).string("end");
+        let _ = p.styled_string("s", Style::new());
+    }
+
+    #[test]
+    fn test_break_and_pagebreak() {
+        let _b = Break::new(2.0);
+        let _p = PageBreak::new();
+    }
+
+    #[test]
+    fn test_padded_styled_framed_constructors() {
+        let txt = Text::new("foo");
+        let _pad = PaddedElement::new(txt.clone(), Margins::from(1.0));
+        let _styled = StyledElement::new(txt.clone(), Style::new());
+        let _framed = FramedElement::new(txt);
+    }
+
+    #[test]
+    fn test_unordered_and_ordered_lists_and_bullets() {
+        let mut ul = UnorderedList::new();
+        ul.push(Paragraph::new("elem"));
+        let _ = UnorderedList::with_bullet("*");
+
+        let mut ol = OrderedList::new();
+        ol.push(Paragraph::new("one"));
+        let _ = OrderedList::with_start(5usize);
+
+        let bp = BulletPoint::new(Paragraph::new("bp"));
+        let _ = bp.with_bullet("a)");
+        let mut bp2 = BulletPoint::new(Paragraph::new("bp2"));
+        bp2.set_bullet("-");
+    }
+
+    #[test]
+    fn test_table_layout_row_push_validation() {
+        let mut table = TableLayout::new(vec![1, 1, 1]);
+        // pushing a row with correct length
+        let row: Vec<Box<dyn Element>> = vec![Box::new(Dummy), Box::new(Dummy), Box::new(Dummy)];
+        assert!(table.push_row(row).is_ok());
+        // pushing one with wrong length
+        let row2: Vec<Box<dyn Element>> = vec![Box::new(Dummy)];
+        assert!(table.push_row(row2).is_err());
+    }
+
+    #[test]
+    fn test_frame_cell_decorator_prepare_cell_and_decorate_cell() {
+        use crate::style::{LineStyle, Color};
+        let mut r = Renderer::new(Size::new(200.0, 200.0), "t").expect("renderer");
+        let layer = r.first_page().first_layer();
+        let area = layer.area();
+        let mut decorator = FrameCellDecorator::with_line_style(true, true, true, LineStyle::new().with_thickness(Mm::from(2.0)).with_color(Color::Rgb(0,0,0)));
+        decorator.set_table_size(3, 4);
+        // Prepare cell should add margins equal to line thickness on applicable sides
+        let prepared = decorator.prepare_cell(0, 0, area.clone());
+        // the prepared area should be narrower than the original
+        assert!(prepared.size().width.0 < area.size().width.0);
+
+        // decorate_cell should return row height increased by thickness for top/bottom when printed
+        let row_height = Mm::from(5.0);
+        let height = decorator.decorate_cell(0, 0, false, area.clone(), row_height);
+        // top and bottom should be printed for first row and last row behaviors; height >= row_height
+        assert!(height >= row_height);
+    }
+
+    #[test]
+    fn test_frame_cell_decorator_last_row_set() {
+        let mut decorator = FrameCellDecorator::new(true, true, false);
+        decorator.set_table_size(2, 3);
+        let mut r = Renderer::new(Size::new(200.0, 200.0), "t").expect("renderer");
+        let layer = r.first_page().first_layer();
+        let area = layer.area();
+        // call decorate on last column to set last_row
+        let _ = decorator.decorate_cell(1, 1, false, area.clone(), Mm::from(3.0));
+        assert_eq!(decorator.last_row, Some(1));
+    }
+
+    #[test]
+    fn test_table_layout_render_stops_on_has_more() {
+        use crate::fonts::{FontData, FontFamily, FontCache};
+        use crate::Context;
+
+        struct MoreElement;
+        impl Element for MoreElement {
+            fn render(&mut self, _context: &Context, _area: render::Area<'_>, _style: Style) -> Result<RenderResult, Error> {
+                Ok(RenderResult { has_more: true, size: Size::new(10.0, 5.0) })
+            }
+        }
+
+        let mut table = TableLayout::new(vec![1]);
+        table.row().element(MoreElement).push().expect("push");
+        table.row().element(Dummy).push().expect("push2");
+
+        let r = Renderer::new(Size::new(200.0, 200.0), "t").expect("renderer");
+        let area = r.first_page().first_layer().area();
+
+        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let fd = FontData::new(data, None).expect("font data");
+        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let cache = FontCache::new(family);
+        let context = Context::new(cache);
+
+        let res = table.render(&context, area, Style::new()).expect("render");
+        assert!(res.has_more);
+    }
+}
+
+
 /// A single line of formatted text.
 ///
 /// This element renders a single styled string on a single line.  It does not wrap it if the
@@ -227,22 +379,22 @@ impl Element for Text {
 ///
 /// With setters:
 /// ```
-/// use genpdfi::{elements, style};
+/// use genpdfi_extended::{elements, style};
 /// let mut p = elements::Paragraph::default();
 /// p.push("This is an ");
 /// p.push_styled("important", style::Color::Rgb(255, 0, 0));
 /// p.push(" message!");
-/// p.set_alignment(genpdfi::Alignment::Center);
+/// p.set_alignment(genpdfi_extended::Alignment::Center);
 /// ```
 ///
 /// Chained:
 /// ```
-/// use genpdfi::{elements, style};
+/// use genpdfi_extended::{elements, style};
 /// let p = elements::Paragraph::default()
 ///     .string("This is an ")
 ///     .styled_string("important", style::Color::Rgb(255, 0, 0))
 ///     .string(" message!")
-///     .aligned(genpdfi::Alignment::Center);
+///     .aligned(genpdfi_extended::Alignment::Center);
 /// ```
 ///
 /// [`Style`]: ../style/struct.Style.html
@@ -262,6 +414,14 @@ pub struct Paragraph {
 
 impl Paragraph {
     /// Creates a new paragraph with the given content.
+    ///
+    /// # Example
+    /// ```
+    /// use genpdfi_extended::elements::Paragraph;
+    /// let mut p = Paragraph::new("start");
+    /// p.push("middle");
+    /// let _ = p.aligned(genpdfi_extended::Alignment::Center).string("end");
+    /// ```
     pub fn new(text: impl Into<StyledString>) -> Paragraph {
         Paragraph {
             text: vec![text.into()],
@@ -440,7 +600,7 @@ impl<T: Into<StyledString>> iter::FromIterator<T> for Paragraph {
 ///
 /// ```
 /// // Draws 5 empty lines (calculating the line height using the current style)
-/// let b = genpdfi::elements::Break::new(5.0);
+/// let b = genpdfi_extended::elements::Break::new(5.0);
 /// ```
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Break {
@@ -487,7 +647,7 @@ impl Element for Break {
 /// # Example
 ///
 /// ```
-/// let pb = genpdfi::elements::PageBreak::new();
+/// let pb = genpdfi_extended::elements::PageBreak::new();
 /// ```
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PageBreak {
@@ -529,18 +689,18 @@ impl Element for PageBreak {
 ///
 /// Direct usage:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let p = elements::PaddedElement::new(
 ///     elements::Paragraph::new("text"),
-///     genpdfi::Margins::trbl(5, 2, 5, 10),
+///     genpdfi_extended::Margins::trbl(5, 2, 5, 10),
 /// );
 /// ```
 ///
 /// Using [`Element::padded`][]:
 /// ```
-/// use genpdfi::{elements, Element as _};
+/// use genpdfi_extended::{elements, Element as _};
 /// let p = elements::Paragraph::new("text")
-///     .padded(genpdfi::Margins::trbl(5, 2, 5, 10));
+///     .padded(genpdfi_extended::Margins::trbl(5, 2, 5, 10));
 /// ```
 ///
 /// [`Element::padded`]: ../trait.Element.html#method.padded
@@ -584,7 +744,7 @@ impl<E: Element> Element for PaddedElement<E> {
 ///
 /// Direct usage:
 /// ```
-/// use genpdfi::{elements, style};
+/// use genpdfi_extended::{elements, style};
 /// let p = elements::StyledElement::new(
 ///     elements::Paragraph::new("text"),
 ///     style::Effect::Bold,
@@ -593,7 +753,7 @@ impl<E: Element> Element for PaddedElement<E> {
 ///
 /// Using [`Element::styled`][]:
 /// ```
-/// use genpdfi::{elements, style, Element as _};
+/// use genpdfi_extended::{elements, style, Element as _};
 /// let p = elements::Paragraph::new("text")
 ///     .styled(style::Effect::Bold);
 /// ```
@@ -633,7 +793,7 @@ impl<E: Element> Element for StyledElement<E> {
 ///
 /// Direct usage:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let p = elements::FramedElement::new(
 ///     elements::Paragraph::new("text"),
 /// );
@@ -641,7 +801,7 @@ impl<E: Element> Element for StyledElement<E> {
 ///
 /// Using [`Element::framed`][]:
 /// ```
-/// use genpdfi::{elements, style, Element as _};
+/// use genpdfi_extended::{elements, style, Element as _};
 /// let p = elements::Paragraph::new("text").framed(style::LineStyle::new());
 /// ```
 ///
@@ -742,7 +902,7 @@ impl<E: Element> Element for FramedElement<E> {
 ///
 /// With setters:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let mut list = elements::UnorderedList::new();
 /// list.push(elements::Paragraph::new("first"));
 /// list.push(elements::Paragraph::new("second"));
@@ -751,7 +911,7 @@ impl<E: Element> Element for FramedElement<E> {
 ///
 /// With setters and a custom bullet symbol:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let mut list = elements::UnorderedList::with_bullet("*");
 /// list.push(elements::Paragraph::new("first"));
 /// list.push(elements::Paragraph::new("second"));
@@ -760,7 +920,7 @@ impl<E: Element> Element for FramedElement<E> {
 ///
 /// Chained:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let list = elements::UnorderedList::new()
 ///     .element(elements::Paragraph::new("first"))
 ///     .element(elements::Paragraph::new("second"))
@@ -769,7 +929,7 @@ impl<E: Element> Element for FramedElement<E> {
 ///
 /// Nested list using a [`LinearLayout`][]:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let list = elements::UnorderedList::new()
 ///     .element(
 ///         elements::OrderedList::new()
@@ -864,7 +1024,7 @@ impl<E: Element + 'static> iter::FromIterator<E> for UnorderedList {
 ///
 /// With setters:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let mut list = elements::OrderedList::new();
 /// list.push(elements::Paragraph::new("first"));
 /// list.push(elements::Paragraph::new("second"));
@@ -873,7 +1033,7 @@ impl<E: Element + 'static> iter::FromIterator<E> for UnorderedList {
 ///
 /// With setters and a custom start number:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let mut list = elements::OrderedList::with_start(5);
 /// list.push(elements::Paragraph::new("first"));
 /// list.push(elements::Paragraph::new("second"));
@@ -882,7 +1042,7 @@ impl<E: Element + 'static> iter::FromIterator<E> for UnorderedList {
 ///
 /// Chained:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let list = elements::OrderedList::new()
 ///     .element(elements::Paragraph::new("first"))
 ///     .element(elements::Paragraph::new("second"))
@@ -891,7 +1051,7 @@ impl<E: Element + 'static> iter::FromIterator<E> for UnorderedList {
 ///
 /// Nested list using a [`LinearLayout`][]:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let list = elements::OrderedList::new()
 ///     .element(
 ///         elements::UnorderedList::new()
@@ -984,7 +1144,7 @@ impl<E: Element + 'static> iter::FromIterator<E> for OrderedList {
 /// # Example
 ///
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let layout = elements::LinearLayout::vertical()
 ///     .element(elements::BulletPoint::new(elements::Paragraph::new("first"))
 ///         .with_bullet("a)"))
@@ -1308,7 +1468,7 @@ impl CellDecorator for FrameCellDecorator {
 ///
 /// With setters:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let mut table = elements::TableLayout::new(vec![1, 1]);
 /// let mut row = table.row();
 /// row.push_element(elements::Paragraph::new("Cell 1"));
@@ -1318,7 +1478,7 @@ impl CellDecorator for FrameCellDecorator {
 ///
 /// Chained:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let table = elements::TableLayout::new(vec![1, 1])
 ///     .row()
 ///     .element(elements::Paragraph::new("Cell 1"))
@@ -1386,7 +1546,7 @@ impl<'a, E: IntoBoxedElement> iter::Extend<E> for TableLayoutRow<'a> {
 ///
 /// With setters:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let mut table = elements::TableLayout::new(vec![1, 1]);
 /// table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
 /// let mut row = table.row();
@@ -1397,7 +1557,7 @@ impl<'a, E: IntoBoxedElement> iter::Extend<E> for TableLayoutRow<'a> {
 ///
 /// Chained:
 /// ```
-/// use genpdfi::elements;
+/// use genpdfi_extended::elements;
 /// let table = elements::TableLayout::new(vec![1, 1])
 ///     .row()
 ///     .element(elements::Paragraph::new("Cell 1"))

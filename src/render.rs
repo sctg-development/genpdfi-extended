@@ -76,6 +76,22 @@ pub struct Renderer {
 
 impl Renderer {
     /// Creates a new PDF document renderer with one page of the given size and the given title.
+    ///
+    /// # Example
+    /// ```
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::Size;
+    /// use genpdfi_extended::Mm;
+    ///
+    /// let mut r = Renderer::new(Size::new(210.0, 297.0), "title").expect("renderer");
+    /// assert_eq!(r.page_count(), 1);
+    /// r.add_page(Size::new(100.0, 100.0));
+    /// assert!(r.page_count() >= 2);
+    /// let page = r.get_page(0).unwrap();
+    /// let layer = page.first_layer();
+    /// let area = layer.area();
+    /// assert!(area.size().width > Mm::from(0.0));
+    /// ```
     pub fn new(size: impl Into<Size>, title: impl AsRef<str>) -> Result<Renderer, Error> {
         let size = size.into();
         let (doc, page_idx, layer_idx) = printpdf::PdfDocument::new(
@@ -907,5 +923,153 @@ fn encode_win1252(s: &str) -> Result<Vec<u16>, Error> {
         ))
     } else {
         Ok(bytes)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_encode_win1252_ok() {
+        let s = "Hello, world!";
+        let res = encode_win1252(s).expect("should encode ascii");
+        assert_eq!(res.len(), s.chars().count());
+    }
+
+    #[test]
+    fn test_encode_win1252_err() {
+        let s = "Hello ☺";
+        let res = encode_win1252(s);
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_renderer_and_page_layers_area_methods() {
+        // Create renderer
+        let mut r = Renderer::new(Size::new(210.0, 297.0), "test").expect("renderer");
+        assert_eq!(r.page_count(), 1);
+        r.add_page(Size::new(100.0, 100.0));
+        assert_eq!(r.page_count(), 2);
+
+        // Access page and layers: add layer via mutable borrow
+        {
+            let mut page_mut = r.get_page_mut(0).expect("page mut");
+            assert_eq!(page_mut.layer_count(), 1);
+            page_mut.add_layer("L2");
+            assert!(page_mut.layer_count() >= 2);
+        }
+
+        // Get a layer and area via an immutable borrow
+        let page = r.get_page(0).expect("page");
+        let layer = page.first_layer();
+        let mut area = layer.area();
+        let orig_size = area.size();
+        // Add margins and offsets
+        area.add_margins(Margins::from((1.0f32, 2.0f32, 3.0f32, 4.0f32)));
+        assert!(area.size().width.0 < orig_size.width.0);
+        area.add_offset(Position::new(1.0, 1.0));
+        assert!(area.size().width.0 < orig_size.width.0);
+
+        // Set size and dimensions
+        area.set_size(Size::new(50.0, 50.0));
+        assert_eq!(area.size(), Size::new(50.0, 50.0));
+        area.set_width(Mm::from(20.0));
+        area.set_height(Mm::from(10.0));
+        assert_eq!(area.size().width, Mm::from(20.0));
+        assert_eq!(area.size().height, Mm::from(10.0));
+
+        // split horizontally
+        let areas = area.split_horizontally(&[1usize, 2usize]);
+        assert_eq!(areas.len(), 2);
+
+        // next layer from area
+        let next_area = area.next_layer();
+        assert_eq!(next_area.size(), area.size());
+    }
+
+    #[test]
+    fn test_add_link_builtin_and_embedded() {
+        use crate::fonts::{FontData, FontFamily, FontCache};
+        use crate::Context;
+        use crate::style::Style;
+
+        // Renderer and page
+        let mut r = Renderer::new(Size::new(210.0, 297.0), "test").expect("renderer");
+        let page = r.first_page();
+        let layer = page.first_layer();
+
+        // Built-in font path
+        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let fd = FontData::new(data.clone(), Some(printpdf::BuiltinFont::Helvetica)).expect("font data");
+        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let mut cache = FontCache::new(family);
+        cache.load_pdf_fonts(&r).expect("load fonts");
+        let context = Context::new(cache);
+
+        // normal area should support link
+        let area = layer.area();
+        let style = Style::new().with_font_family(context.font_cache.default_font_family());
+        assert!(area.add_link(&context.font_cache, Position::default(), style, "Hello", "http://example.com").unwrap());
+
+        // too small area should return false
+        let mut small_area = layer.area();
+        small_area.set_size(Size::new(1.0, 1.0));
+        let style = Style::new().with_font_family(context.font_cache.default_font_family());
+        assert!(!small_area.add_link(&context.font_cache, Position::default(), style, "X", "http://x").unwrap());
+
+        // Embedded font path
+        let fd2 = FontData::new(data, None).expect("font data");
+        let family2 = FontFamily { regular: fd2.clone(), bold: fd2.clone(), italic: fd2.clone(), bold_italic: fd2.clone() };
+        let mut cache2 = FontCache::new(family2);
+        cache2.load_pdf_fonts(&r).expect("load fonts");
+        let context2 = Context::new(cache2);
+        let style2 = Style::new().with_font_family(context2.font_cache.default_font_family());
+        assert!(area.add_link(&context2.font_cache, Position::default(), style2, "Hi", "http://example.com").unwrap());
+    }
+
+    #[test]
+    fn test_area_print_str_returns_false_when_too_small() {
+        use crate::fonts::{FontData, FontFamily, FontCache};
+        use crate::style::Style;
+
+        let mut r = Renderer::new(Size::new(210.0, 297.0), "test").expect("renderer");
+        let area = r.first_page().first_layer().area();
+
+        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let fd = FontData::new(data, None).expect("font data");
+        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let mut cache = FontCache::new(family);
+        cache.load_pdf_fonts(&r).expect("load fonts");
+
+        let mut small_area = area.clone();
+        small_area.set_size(Size::new(10.0, 0.1));
+        let style = Style::new().with_font_family(cache.default_font_family());
+        let res = small_area.print_str(&cache, Position::default(), style, "Hello").unwrap();
+        assert!(!res);
+    }
+
+    #[test]
+    fn test_text_section_add_newline() {
+        use crate::fonts::{FontData, FontFamily, FontCache};
+        use crate::style::Style;
+
+        let mut r = Renderer::new(Size::new(210.0, 297.0), "test").expect("renderer");
+        let area = r.first_page().first_layer().area();
+
+        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let fd = FontData::new(data, None).expect("font data");
+        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let cache = FontCache::new(family);
+
+        let style = Style::new().with_font_family(cache.default_font_family());
+        let metrics = style.metrics(&cache);
+
+        let mut area2 = area.clone();
+        area2.set_size(Size::new(100.0, metrics.line_height.0 + 1.0));
+        let mut section = area2
+            .text_section(&cache, Position::default(), metrics)
+            .expect("should create section");
+        assert!(section.add_newline());
     }
 }

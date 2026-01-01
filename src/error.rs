@@ -163,3 +163,40 @@ impl From<image::ImageError> for ErrorKind {
         ErrorKind::ImageError(error)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::error::Error as _;
+    use std::io;
+
+    #[test]
+    fn test_error_display_and_source() {
+        let io_err = io::Error::new(io::ErrorKind::Other, "io fail");
+        let e: Error = Error::new("oops", ErrorKind::IoError(io_err));
+        assert_eq!(format!("{}", e), "oops");
+        match e.source() {
+            Some(src) => {
+                let src_str = format!("{}", src);
+                assert!(src_str.contains("io fail"));
+            }
+            None => panic!("expected source for IoError"),
+        }
+    }
+
+    #[test]
+    fn test_context_maps_errors() {
+        let res: Result<(), io::Error> = Err(io::Error::new(io::ErrorKind::Other, "boom"));
+        let mapped = res.context("wrapped");
+        match mapped {
+            Err(err) => {
+                assert_eq!(format!("{}", err), "wrapped");
+                match err.kind() {
+                    ErrorKind::IoError(ioe) => assert_eq!(ioe.kind(), io::ErrorKind::Other),
+                    k => panic!("unexpected kind: {:?}", k),
+                }
+            }
+            Ok(_) => panic!("expected Err"),
+        }
+    }
+}

@@ -20,7 +20,7 @@ use ttf_parser::Face;
 ///
 /// # Example
 /// ```rust,no_run
-/// use genpdfi::subsetting::subset_font;
+/// use genpdfi_extended::subsetting::subset_font;
 ///
 /// let font_data = std::fs::read("font.ttf").unwrap();
 /// let text = "Hello World ăâîșț";  // Romanian characters
@@ -63,7 +63,7 @@ pub fn subset_font(font_data: &[u8], text: &str) -> Result<Vec<u8>, Error> {
 ///
 /// # Example
 /// ```
-/// use genpdfi::subsetting::collect_used_chars;
+/// use genpdfi_extended::subsetting::collect_used_chars;
 ///
 /// let text = "Hello World! Hello again!";
 /// let chars = collect_used_chars(text);
@@ -101,4 +101,19 @@ mod tests {
         assert!(chars.contains(&'ș'));
         assert!(chars.contains(&'ț'));
     }
+
+    #[test]
+    fn test_subset_font_smaller() {
+        // Use bundled test font
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf");
+        if !std::path::Path::new(path).exists() {
+            eprintln!("Skipping test_subset_font_smaller: test font missing");
+            return;
+        }
+        let data = std::fs::read(path).expect("read font");
+        let subset = subset_font(&data, "Hello world").expect("subsetting failed");
+        assert!(subset.len() > 0);
+        assert!(subset.len() < data.len());
+    }
 }
+

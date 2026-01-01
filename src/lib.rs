@@ -398,11 +398,11 @@ impl<T: Into<Mm>> From<T> for Margins {
 ///
 /// ```no_run
 /// // Load a font from the file system
-/// let font_family = genpdfi::fonts::from_files("./fonts", "LiberationSans", None)
+/// let font_family = genpdfi_extended::fonts::from_files("./fonts", "LiberationSans", None)
 ///     .expect("Failed to load font family");
 /// // Create a document and set the default font family
-/// let mut doc = genpdfi::Document::new(font_family);
-/// doc.push(genpdfi::elements::Paragraph::new("Document content"));
+/// let mut doc = genpdfi_extended::Document::new(font_family);
+/// doc.push(genpdfi_extended::elements::Paragraph::new("Document content"));
 /// doc.render_to_file("output.pdf").expect("Failed to render document");
 /// ```
 ///
@@ -563,6 +563,19 @@ impl Document {
     /// The given writer is always wrapped in a buffered writer.  For details on the rendering
     /// process, see the [Rendering Process section of the crate
     /// documentation](index.html#rendering-process).
+    ///
+    /// # Example
+    /// ```
+    /// use genpdfi_extended::{Document, elements, fonts};
+    /// let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+    /// let fd = fonts::FontData::new(data, None).expect("font data");
+    /// let family = fonts::FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+    /// let mut doc = Document::new(family);
+    /// doc.push(elements::Paragraph::new("Hello, world!"));
+    /// let mut out = Vec::new();
+    /// doc.render(&mut out).expect("render");
+    /// assert!(!out.is_empty());
+    /// ```
     pub fn render(mut self, w: impl io::Write) -> Result<(), error::Error> {
         let mut renderer = render::Renderer::new(self.paper_size, &self.title)?;
         if let Some(conformance) = self.conformance {
@@ -882,5 +895,27 @@ mod tests {
         assert_eq!(None, Rotation::from(-360.0).degrees());
         assert_eq!(Some(-90.0), Rotation::from(-450.0).degrees());
         assert_eq!(Some(-180.0), Rotation::from(-540.0).degrees());
+    }
+
+    #[test]
+    fn test_margins_and_mm_conversions() {
+        use super::{Mm, Margins, Position, Size};
+        // Mm conversion from integers and floats
+        let m1: Mm = 5u8.into();
+        assert_eq!(m1, Mm(5.0));
+        let m2: Mm = 2.5f32.into();
+        assert_eq!(m2, Mm(2.5));
+
+        // Margins from tuple and single value
+        let m = Margins::from((1.0f32, 2.0f32, 3.0f32, 4.0f32));
+        assert_eq!(m, Margins::trbl(1.0f32, 2.0f32, 3.0f32, 4.0f32));
+        let all = Margins::from(1.0f32);
+        assert_eq!(all, Margins::all(1.0f32));
+
+        // Position and Size
+        let pos: Position = (10.0f32, 20.0f32).into();
+        assert_eq!(pos, Position::new(Mm(10.0), Mm(20.0)));
+        let sz: Size = (80.0f32, 200.0f32).into();
+        assert_eq!(sz.width, Mm(80.0));
     }
 }

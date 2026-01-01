@@ -198,6 +198,16 @@ impl FontData {
     /// documentation](index.html) for more information).  In this case, the given font must be
     /// metrically identical to the built-in font.
     ///
+    /// # Example
+    /// ```
+    /// use genpdfi_extended::fonts::{FontData, FontFamily, FontCache};
+    /// let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+    /// let fd = FontData::new(data, None).expect("font data");
+    /// let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+    /// let cache = FontCache::new(family);
+    /// let _default = cache.default_font_family();
+    /// ```
+    ///
     /// [`rusttype`]: https://docs.rs/rusttype
     pub fn new(data: Vec<u8>, builtin: Option<printpdf::BuiltinFont>) -> Result<FontData, Error> {
         let raw_data = if let Some(builtin) = builtin {
@@ -283,7 +293,7 @@ impl FontData {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use genpdfi::fonts::FontData;
+    /// # use genpdfi_extended::fonts::FontData;
     /// # let font_data = FontData::load("font.ttf", None).unwrap();
     /// if font_data.has_glyph('ă') {
     ///     println!("Font supports Romanian characters!");
@@ -308,7 +318,7 @@ impl FontData {
     ///
     /// # Example
     /// ```rust,no_run
-    /// # use genpdfi::fonts::FontData;
+    /// # use genpdfi_extended::fonts::FontData;
     /// # let font_data = FontData::load("font.ttf", None).unwrap();
     /// let coverage = font_data.check_coverage("Hello ăâîșț!");
     /// println!("Coverage: {:.1}%", coverage.coverage_percent());
@@ -386,7 +396,7 @@ impl GlyphCoverage {
 ///
 /// # Example
 /// ```rust,no_run
-/// use genpdfi::fonts::{FontData, FontFallbackChain};
+/// use genpdfi_extended::fonts::{FontData, FontFallbackChain};
 ///
 /// let primary = FontData::load("NotoSans.ttf", None).unwrap();
 /// let cyrillic = FontData::load("NotoSansCyrillic.ttf", None).unwrap();
@@ -466,8 +476,8 @@ impl FontFallbackChain {
 
         for c in unique_chars.iter() {
             // Check if ANY font in chain has this character
-            let has_glyph = self.primary.has_glyph(*c)
-                || self.fallbacks.iter().any(|f| f.has_glyph(*c));
+            let has_glyph =
+                self.primary.has_glyph(*c) || self.fallbacks.iter().any(|f| f.has_glyph(*c));
 
             if !has_glyph {
                 missing_chars.push(*c);
@@ -492,7 +502,7 @@ impl FontFallbackChain {
     ///
     /// # Example
     /// ```no_run
-    /// # use genpdfi::fonts::{FontData, FontFallbackChain};
+    /// # use genpdfi_extended::fonts::{FontData, FontFallbackChain};
     /// # let primary = FontData::load("font.ttf", None).unwrap();
     /// # let fallback = FontData::load("fallback.ttf", None).unwrap();
     /// let chain = FontFallbackChain::new(primary).with_fallback(fallback);
@@ -633,6 +643,110 @@ impl<T: Clone + Copy + fmt::Debug + PartialEq> FontFamily<T> {
         } else {
             self.regular
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fonts::FontData;
+    use std::path::PathBuf;
+
+    #[test]
+    fn test_fontfamily_get_variants() {
+        // Use integers as dummy font identifiers for testing selection logic
+        let fam = FontFamily {
+            regular: 1usize,
+            bold: 2usize,
+            italic: 3usize,
+            bold_italic: 4usize,
+        };
+
+        assert_eq!(fam.get(Style::new()), 1);
+        assert_eq!(fam.get(Style::new().bold()), 2);
+        assert_eq!(fam.get(Style::new().italic()), 3);
+        assert_eq!(fam.get(Style::new().bold().italic()), 4);
+    }
+
+    #[test]
+    fn test_fontdata_new_with_real_font() {
+        // Try to load one of the bundled test fonts
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        // Use a bundled test font at compile time for robustness (fonts/ directory)
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
+        let fd = FontData::new(data, None).expect("FontData::new failed on valid font");
+        // Ensure some fields are set via methods
+        assert!(fd.rt_font.units_per_em() != 0);
+    }
+
+    #[test]
+    fn test_fontdata_new_invalid() {
+        let data = b"not a font".to_vec();
+        assert!(FontData::new(data, None).is_err());
+    }
+
+    #[test]
+    fn test_font_builtin_metrics_and_char_width() {
+        // Construct a Font with built-in flag and simple metrics
+        let f = Font {
+            idx: 0,
+            is_builtin: true,
+            scale: rusttype::Scale::uniform(1.0),
+            line_height: Mm::from(1.2),
+            glyph_height: Mm::from(0.8),
+            ascent: Mm::from(0.2),
+            descent: Mm::from(-0.1),
+        };
+        assert!(f.is_builtin());
+        let lh = f.get_line_height(12);
+        assert!(lh.0 > 0.0);
+        let gh = f.glyph_height(12);
+        assert!(gh.0 > 0.0);
+        let asc = f.ascent(12);
+        let desc = f.descent(12);
+        assert!(asc.0 > desc.0);
+
+        // Test builtin char metrics for space and 'A'
+        let hm_space = f.builtin_char_h_metrics(' ');
+        assert!((hm_space.advance_width - 0.278).abs() < 1e-6);
+        let hm_A = f.builtin_char_h_metrics('A');
+        // A should have a positive advance
+        assert!(hm_A.advance_width > 0.0);
+    }
+
+    #[test]
+    fn test_fontcache_default_family() {
+        // Use include_bytes to get font data
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
+        let fd = FontData::new(data, None).expect("FontData::new failed");
+        let family_data = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
+        let cache = FontCache::new(family_data);
+        let _def = cache.default_font_family();
+        // PDF fonts not loaded yet
+        assert!(cache
+            .get_pdf_font(Font {
+                idx: 0,
+                is_builtin: false,
+                scale: rusttype::Scale::uniform(1.0),
+                line_height: Mm(1.0),
+                glyph_height: Mm(1.0),
+                ascent: Mm(0.0),
+                descent: Mm(0.0)
+            })
+            .is_none());
     }
 }
 
