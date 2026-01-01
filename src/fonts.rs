@@ -215,7 +215,9 @@ impl FontData {
         } else {
             RawFontData::Embedded(Arc::new(data.clone()))
         };
-        let rt_font = rusttype::Font::from_bytes(data).context("Failed to read rusttype font")?;
+        // rusttype 0.9 provides `try_from_vec` which returns an Option<Font<'static>>
+        let rt_font = rusttype::Font::try_from_vec(data.clone())
+            .ok_or_else(|| Error::new("Failed to read rusttype font", ErrorKind::InvalidFont))?;
         if rt_font.units_per_em() == 0 {
             Err(Error::new(
                 "The font is not scalable",
@@ -238,8 +240,9 @@ impl FontData {
         } else {
             RawFontData::Embedded(shared_data.clone())
         };
-        let rt_font = rusttype::Font::from_bytes(shared_data.to_vec())
-            .context("Failed to read rusttype font")?;
+        // rusttype 0.9 provides `try_from_vec` which returns an Option<Font<'static>>
+        let rt_font = rusttype::Font::try_from_vec(shared_data.to_vec())
+            .ok_or_else(|| Error::new("Failed to read rusttype font", ErrorKind::InvalidFont))?;
         if rt_font.units_per_em() == 0 {
             Err(Error::new(
                 "The font is not scalable",

@@ -13,13 +13,13 @@ exclude = [".builds/*"]
 readme = "README.md"
 
 [dependencies]
-lopdf = "0.26"
-rusttype = "0.8"
+lopdf = "0.33.0"
+rusttype = "0.9.3"
 subsetter = "0.2.3"
-ttf-parser = "0.24"
+ttf-parser = "0.25.1"
 
 [dependencies.image]
-version = "0.24.9"
+version = "0.25.9"
 default-features = false
 optional = true
 
@@ -32,12 +32,12 @@ version = "0.7.0"
 default-features = false
 
 [dependencies.derive_more]
-version = "0.99"
+version = "2.1.1"
 default-features = false
 features = ["add", "add_assign", "from", "into", "mul", "mul_assign", "sum"]
 
 [dev-dependencies.float-cmp]
-version = "0.8"
+version = "0.10.0"
 default-features = false
 features = ["std"]
 
