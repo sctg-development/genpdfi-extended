@@ -990,9 +990,9 @@ mod tests {
 
     #[test]
     fn test_add_link_builtin_and_embedded() {
-        use crate::fonts::{FontData, FontFamily, FontCache};
-        use crate::Context;
+        use crate::fonts::{FontCache, FontData, FontFamily};
         use crate::style::Style;
+        use crate::Context;
 
         // Renderer and page
         let mut r = Renderer::new(Size::new(210.0, 297.0), "test").expect("renderer");
@@ -1000,9 +1000,19 @@ mod tests {
         let layer = page.first_layer();
 
         // Built-in font path
-        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
-        let fd = FontData::new(data.clone(), Some(printpdf::BuiltinFont::Helvetica)).expect("font data");
-        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
+        let fd =
+            FontData::new(data.clone(), Some(printpdf::BuiltinFont::Helvetica)).expect("font data");
+        let family = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
         let mut cache = FontCache::new(family);
         cache.load_pdf_fonts(&r).expect("load fonts");
         let context = Context::new(cache);
@@ -1010,56 +1020,105 @@ mod tests {
         // normal area should support link
         let area = layer.area();
         let style = Style::new().with_font_family(context.font_cache.default_font_family());
-        assert!(area.add_link(&context.font_cache, Position::default(), style, "Hello", "http://example.com").unwrap());
+        assert!(area
+            .add_link(
+                &context.font_cache,
+                Position::default(),
+                style,
+                "Hello",
+                "http://example.com"
+            )
+            .unwrap());
 
         // too small area should return false
         let mut small_area = layer.area();
         small_area.set_size(Size::new(1.0, 1.0));
         let style = Style::new().with_font_family(context.font_cache.default_font_family());
-        assert!(!small_area.add_link(&context.font_cache, Position::default(), style, "X", "http://x").unwrap());
+        assert!(!small_area
+            .add_link(
+                &context.font_cache,
+                Position::default(),
+                style,
+                "X",
+                "http://x"
+            )
+            .unwrap());
 
         // Embedded font path
         let fd2 = FontData::new(data, None).expect("font data");
-        let family2 = FontFamily { regular: fd2.clone(), bold: fd2.clone(), italic: fd2.clone(), bold_italic: fd2.clone() };
+        let family2 = FontFamily {
+            regular: fd2.clone(),
+            bold: fd2.clone(),
+            italic: fd2.clone(),
+            bold_italic: fd2.clone(),
+        };
         let mut cache2 = FontCache::new(family2);
         cache2.load_pdf_fonts(&r).expect("load fonts");
         let context2 = Context::new(cache2);
         let style2 = Style::new().with_font_family(context2.font_cache.default_font_family());
-        assert!(area.add_link(&context2.font_cache, Position::default(), style2, "Hi", "http://example.com").unwrap());
+        assert!(area
+            .add_link(
+                &context2.font_cache,
+                Position::default(),
+                style2,
+                "Hi",
+                "http://example.com"
+            )
+            .unwrap());
     }
 
     #[test]
     fn test_area_print_str_returns_false_when_too_small() {
-        use crate::fonts::{FontData, FontFamily, FontCache};
+        use crate::fonts::{FontCache, FontData, FontFamily};
         use crate::style::Style;
 
         let mut r = Renderer::new(Size::new(210.0, 297.0), "test").expect("renderer");
         let area = r.first_page().first_layer().area();
 
-        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
         let fd = FontData::new(data, None).expect("font data");
-        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let family = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
         let mut cache = FontCache::new(family);
         cache.load_pdf_fonts(&r).expect("load fonts");
 
         let mut small_area = area.clone();
         small_area.set_size(Size::new(10.0, 0.1));
         let style = Style::new().with_font_family(cache.default_font_family());
-        let res = small_area.print_str(&cache, Position::default(), style, "Hello").unwrap();
+        let res = small_area
+            .print_str(&cache, Position::default(), style, "Hello")
+            .unwrap();
         assert!(!res);
     }
 
     #[test]
     fn test_text_section_add_newline() {
-        use crate::fonts::{FontData, FontFamily, FontCache};
+        use crate::fonts::{FontCache, FontData, FontFamily};
         use crate::style::Style;
 
         let mut r = Renderer::new(Size::new(210.0, 297.0), "test").expect("renderer");
         let area = r.first_page().first_layer().area();
 
-        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
         let fd = FontData::new(data, None).expect("font data");
-        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let family = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
         let cache = FontCache::new(family);
 
         let style = Style::new().with_font_family(cache.default_font_family());

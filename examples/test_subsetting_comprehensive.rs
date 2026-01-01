@@ -24,7 +24,8 @@ fn main() {
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
     ];
 
-    let font_data = font_paths.iter()
+    let font_data = font_paths
+        .iter()
         .find_map(|path| std::fs::read(path).ok())
         .expect("No suitable font found");
 

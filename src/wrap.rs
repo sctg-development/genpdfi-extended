@@ -192,9 +192,9 @@ impl<I: Iterator<Item = style::StyledString>> Iterator for Words<I> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::style::{StyledString, Style};
+    use crate::fonts::{self, FontCache, FontData, FontFamily};
+    use crate::style::{Style, StyledString};
     use crate::Context;
-    use crate::fonts::{self, FontData, FontFamily, FontCache};
     use std::path::PathBuf;
 
     fn find_test_font() -> Option<PathBuf> {
@@ -215,7 +215,11 @@ mod tests {
 
     #[test]
     fn test_words_iterator_splits_on_space() {
-        let input = vec![StyledString::new("Hello world!".to_owned(), Style::new(), None)];
+        let input = vec![StyledString::new(
+            "Hello world!".to_owned(),
+            Style::new(),
+            None,
+        )];
         let mut words = Words::new(input.into_iter());
         let w1 = words.next().unwrap();
         assert_eq!(w1.s, "Hello ");
@@ -228,9 +232,18 @@ mod tests {
     fn test_wrapper_overflow_sets_flag() {
         // Build a context with a real font to get realistic widths
         // Use bundled test font bytes from the `fonts/` directory to avoid runtime path issues
-        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
         let fd = FontData::new(data, None).expect("font data");
-        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let family = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
         let cache = FontCache::new(family);
         let context = Context::new(cache);
 
@@ -241,4 +254,3 @@ mod tests {
         assert!(wrapper.has_overflowed());
     }
 }
-

@@ -899,7 +899,7 @@ mod tests {
 
     #[test]
     fn test_margins_and_mm_conversions() {
-        use super::{Mm, Margins, Position, Size};
+        use super::{Margins, Mm, Position, Size};
         // Mm conversion from integers and floats
         let m1: Mm = 5u8.into();
         assert_eq!(m1, Mm(5.0));

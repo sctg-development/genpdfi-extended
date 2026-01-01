@@ -277,9 +277,9 @@ fn bounding_box_offset_and_size(rotation: &Rotation, size: &Size) -> (Position, 
 #[cfg(test)]
 mod tests {
     use super::{bounding_box_offset_and_size, Image};
-    use crate::{Position, Rotation, Size};
     use crate::render::Renderer;
     use crate::Element;
+    use crate::{Position, Rotation, Size};
     use float_cmp::approx_eq;
 
     macro_rules! assert_approx_eq {
@@ -506,36 +506,49 @@ mod tests {
     #[cfg(feature = "images")]
     #[test]
     fn test_from_dynamic_image_rejects_alpha() {
-        let rgba = image::DynamicImage::ImageRgba8(
-            image::RgbaImage::from_pixel(1, 1, image::Rgba([0, 0, 0, 128])),
-        );
+        let rgba = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            1,
+            1,
+            image::Rgba([0, 0, 0, 128]),
+        ));
         assert!(Image::from_dynamic_image(rgba).is_err());
     }
 
     #[cfg(feature = "images")]
     #[test]
     fn test_render_image_sets_size_with_no_position() {
-        use crate::fonts::{FontData, FontFamily, FontCache};
-        use crate::Context;
+        use crate::fonts::{FontCache, FontData, FontFamily};
         use crate::style::Style;
+        use crate::Context;
 
         // renderer & area
         let r = Renderer::new(Size::new(200.0, 200.0), "t").expect("renderer");
         let area = r.first_page().first_layer().area();
 
         // make a 10x10 rgb image
-        let rgb = image::DynamicImage::ImageRgb8(
-            image::RgbImage::from_pixel(10, 10, image::Rgb([10, 20, 30])),
-        );
+        let rgb = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            10,
+            10,
+            image::Rgb([10, 20, 30]),
+        ));
         let mut img = Image::from_dynamic_image(rgb).expect("image");
 
         // expected bounding box
         let expected = bounding_box_offset_and_size(&img.rotation, &img.get_size()).1;
 
         // build dummy font cache/context
-        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
         let fd = FontData::new(data.clone(), None).expect("font data");
-        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let family = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
         let cache = FontCache::new(family);
         let context = Context::new(cache);
 
@@ -546,20 +559,31 @@ mod tests {
     #[cfg(feature = "images")]
     #[test]
     fn test_render_image_with_position_does_not_set_result_size() {
-        use crate::fonts::{FontData, FontFamily, FontCache};
-        use crate::Context;
+        use crate::fonts::{FontCache, FontData, FontFamily};
         use crate::style::Style;
+        use crate::Context;
 
         let mut r = Renderer::new(Size::new(200.0, 200.0), "t").expect("renderer");
         let area = r.first_page().first_layer().area();
-        let rgb = image::DynamicImage::ImageRgb8(
-            image::RgbImage::from_pixel(10, 10, image::Rgb([10, 20, 30])),
-        );
+        let rgb = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            10,
+            10,
+            image::Rgb([10, 20, 30]),
+        ));
         let mut img = Image::from_dynamic_image(rgb).expect("image");
         img.set_position(Position::new(10, 10));
-        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
         let fd = FontData::new(data.clone(), None).expect("font data");
-        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let family = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
         let cache = FontCache::new(family);
         let context = Context::new(cache);
 
@@ -577,9 +601,11 @@ mod tests {
     #[cfg(feature = "images")]
     #[test]
     fn test_get_size_with_dpi_override() {
-        let rgb = image::DynamicImage::ImageRgb8(
-            image::RgbImage::from_pixel(100, 50, image::Rgb([0, 0, 0])),
-        );
+        let rgb = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            100,
+            50,
+            image::Rgb([0, 0, 0]),
+        ));
         let mut img = Image::from_dynamic_image(rgb).expect("image");
         img.set_dpi(100.0);
         let size = img.get_size();

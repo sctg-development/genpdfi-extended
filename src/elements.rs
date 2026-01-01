@@ -169,9 +169,9 @@ impl<E: IntoBoxedElement> iter::Extend<E> for LinearLayout {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::Renderer;
     use crate::style::Style;
     use crate::Margins;
-    use crate::render::Renderer;
 
     // Dummy element used for testing constructors and push methods without invoking rendering
     #[derive(Clone, Debug)]
@@ -257,11 +257,18 @@ mod tests {
 
     #[test]
     fn test_frame_cell_decorator_prepare_cell_and_decorate_cell() {
-        use crate::style::{LineStyle, Color};
+        use crate::style::{Color, LineStyle};
         let mut r = Renderer::new(Size::new(200.0, 200.0), "t").expect("renderer");
         let layer = r.first_page().first_layer();
         let area = layer.area();
-        let mut decorator = FrameCellDecorator::with_line_style(true, true, true, LineStyle::new().with_thickness(Mm::from(2.0)).with_color(Color::Rgb(0,0,0)));
+        let mut decorator = FrameCellDecorator::with_line_style(
+            true,
+            true,
+            true,
+            LineStyle::new()
+                .with_thickness(Mm::from(2.0))
+                .with_color(Color::Rgb(0, 0, 0)),
+        );
         decorator.set_table_size(3, 4);
         // Prepare cell should add margins equal to line thickness on applicable sides
         let prepared = decorator.prepare_cell(0, 0, area.clone());
@@ -289,13 +296,21 @@ mod tests {
 
     #[test]
     fn test_table_layout_render_stops_on_has_more() {
-        use crate::fonts::{FontData, FontFamily, FontCache};
+        use crate::fonts::{FontCache, FontData, FontFamily};
         use crate::Context;
 
         struct MoreElement;
         impl Element for MoreElement {
-            fn render(&mut self, _context: &Context, _area: render::Area<'_>, _style: Style) -> Result<RenderResult, Error> {
-                Ok(RenderResult { has_more: true, size: Size::new(10.0, 5.0) })
+            fn render(
+                &mut self,
+                _context: &Context,
+                _area: render::Area<'_>,
+                _style: Style,
+            ) -> Result<RenderResult, Error> {
+                Ok(RenderResult {
+                    has_more: true,
+                    size: Size::new(10.0, 5.0),
+                })
             }
         }
 
@@ -306,9 +321,18 @@ mod tests {
         let r = Renderer::new(Size::new(200.0, 200.0), "t").expect("renderer");
         let area = r.first_page().first_layer().area();
 
-        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
         let fd = FontData::new(data, None).expect("font data");
-        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let family = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
         let cache = FontCache::new(family);
         let context = Context::new(cache);
 
@@ -316,7 +340,6 @@ mod tests {
         assert!(res.has_more);
     }
 }
-
 
 /// A single line of formatted text.
 ///
