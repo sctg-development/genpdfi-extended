@@ -906,24 +906,55 @@ impl<'f, 'p> Drop for TextSection<'f, 'p> {
 /// Encodes the given string using the Windows-1252 encoding for use with built-in PDF fonts,
 /// returning an error if it contains unsupported characters.
 fn encode_win1252(s: &str) -> Result<Vec<u16>, Error> {
-    let bytes: Vec<_> = lopdf::Document::encode_text(Some("WinAnsiEncoding"), s)
-        .into_iter()
-        .map(u16::from)
-        .collect();
-
-    // Windows-1252 is a single-byte encoding, so one byte is one character.
-    if bytes.len() != s.chars().count() {
-        Err(Error::new(
-            format!(
-                "Tried to print a string with characters that are not supported by the \
-                Windows-1252 encoding with a built-in font: {}",
-                s
-            ),
-            ErrorKind::UnsupportedEncoding,
-        ))
-    } else {
-        Ok(bytes)
+    // Implement Windows-1252 encoding locally to avoid depending on lopdf internal API changes.
+    // Map Unicode characters to single-byte Windows-1252 values where possible.
+    let mut out: Vec<u16> = Vec::with_capacity(s.len());
+    for c in s.chars() {
+        let b = match c as u32 {
+            0x00..=0x7F => Some(c as u8),
+            0xA0..=0xFF => Some(c as u8),
+            0x20AC => Some(0x80), // EURO SIGN
+            0x201A => Some(0x82),
+            0x0192 => Some(0x83),
+            0x201E => Some(0x84),
+            0x2026 => Some(0x85),
+            0x2020 => Some(0x86),
+            0x2021 => Some(0x87),
+            0x02C6 => Some(0x88),
+            0x2030 => Some(0x89),
+            0x0160 => Some(0x8A),
+            0x2039 => Some(0x8B),
+            0x0152 => Some(0x8C),
+            0x017D => Some(0x8E),
+            0x2018 => Some(0x91),
+            0x2019 => Some(0x92),
+            0x201C => Some(0x93),
+            0x201D => Some(0x94),
+            0x2022 => Some(0x95),
+            0x2013 => Some(0x96),
+            0x2014 => Some(0x97),
+            0x02DC => Some(0x98),
+            0x2122 => Some(0x99),
+            0x0161 => Some(0x9A),
+            0x203A => Some(0x9B),
+            0x0153 => Some(0x9C),
+            0x017E => Some(0x9E),
+            0x0178 => Some(0x9F),
+            _ => None,
+        };
+        if let Some(b) = b {
+            out.push(u16::from(b));
+        } else {
+            return Err(Error::new(
+                format!(
+                    "Tried to print a string with characters that are not supported by the Windows-1252 encoding with a built-in font: {}",
+                    s
+                ),
+                ErrorKind::UnsupportedEncoding,
+            ));
+        }
     }
+    Ok(out)
 }
 
 #[cfg(test)]

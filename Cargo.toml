@@ -13,7 +13,7 @@ exclude = [".builds/*"]
 readme = "README.md"
 
 [dependencies]
-lopdf = "0.33.0"
+lopdf = "0.38.0"
 rusttype = "0.9.3"
 subsetter = "0.2.3"
 ttf-parser = "0.25.1"
