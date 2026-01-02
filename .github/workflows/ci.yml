@@ -47,7 +47,12 @@ jobs:
       - name: Run tests (default features)
         run: cargo test --verbose
 
+      - name: Install Python deps for visual tests
+        run: python3 -m pip install --upgrade pip && python3 -m pip install -r tests/scripts/requirements.txt
+
       - name: Run tests (images feature)
+        env:
+          CI_VISUAL_STRICT: "1"
         run: cargo test --features images --verbose
 
       - name: Generate coverage (Tarpaulin)

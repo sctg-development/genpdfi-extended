@@ -38,14 +38,10 @@ version = "2.1.1"
 default-features = false
 features = ["add", "add_assign", "from", "into", "mul", "mul_assign", "sum"]
 
-[dev-dependencies.float-cmp]
-version = "0.10.0"
-default-features = false
-features = ["std"]
-
-[dev-dependencies.hyphenation]
-version = "0.8"
-features = ["embed_en-us"]
+[dev-dependencies]
+float-cmp = { version = "0.10.0", default-features = false, features = ["std"] }
+hyphenation = { version = "0.8", features = ["embed_en-us"] }
+tempfile = "3"
 
 [features]
 default = []
