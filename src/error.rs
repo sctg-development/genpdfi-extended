@@ -8,6 +8,16 @@ use std::io;
 ///
 /// This trait is inspired by [`anyhow::Context`][].
 ///
+/// # Examples
+///
+/// ```
+/// use genpdfi_extended::error::{Context as _, Error};
+/// use std::io;
+/// let res: Result<(), io::Error> = Err(io::Error::new(io::ErrorKind::Other, "boom"));
+/// let mapped = res.context("wrapped");
+/// assert!(mapped.is_err());
+/// ```
+///
 /// [`Error`]: struct.Error.html
 /// [`anyhow::Context`]: https://docs.rs/anyhow/latest/anyhow/trait.Context.html
 pub trait Context<T> {
@@ -51,6 +61,15 @@ pub struct Error {
 
 impl Error {
     /// Creates a new error.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::error::{Error, ErrorKind};
+    /// let e = Error::new("oops", ErrorKind::Internal);
+    /// assert_eq!(format!("{}", e), "oops");
+    /// match e.kind() { ErrorKind::Internal => {}, k => panic!("unexpected: {:?}", k) }
+    /// ```
     pub fn new(msg: impl Into<String>, kind: impl Into<ErrorKind>) -> Error {
         Error {
             msg: msg.into(),

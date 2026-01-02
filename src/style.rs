@@ -117,6 +117,15 @@ pub struct Style {
 
 impl Style {
     /// Creates a new style without settings.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::style::Style;
+    /// let s = Style::new();
+    /// assert_eq!(s.font_size(), 12);
+    /// assert!(!s.is_bold());
+    /// ```
     pub fn new() -> Style {
         Style::default()
     }
@@ -145,6 +154,17 @@ impl Style {
     }
 
     /// Combines this style and the given style and returns the result.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::style::Style;
+    /// let a = Style::new().bold();
+    /// let b = Style::new().with_font_size(18);
+    /// let c = a.and(b);
+    /// assert!(c.is_bold());
+    /// assert_eq!(c.font_size(), 18);
+    /// ```
     pub fn and(mut self, style: impl Into<Style>) -> Style {
         self.merge(style);
         self
@@ -186,6 +206,16 @@ impl Style {
     }
 
     /// Sets the bold effect for this style and returns it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::style::Style;
+    /// let s = Style::new().bold();
+    /// assert!(s.is_bold());
+    /// let s2 = s.italic();
+    /// assert!(s2.is_italic());
+    /// ```
     pub fn bold(mut self) -> Style {
         self.set_bold();
         self
@@ -208,6 +238,19 @@ impl Style {
     }
 
     /// Sets the font family for this style and returns it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::style::Style;
+    /// use genpdfi_extended::fonts::{FontData, FontFamily, FontCache};
+    /// let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+    /// let fd = FontData::new(data.clone(), None).expect("font data");
+    /// let family_data = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+    /// let mut cache = FontCache::new(family_data);
+    /// let family = cache.default_font_family();
+    /// let s = Style::new().with_font_family(family);
+    /// ```
     pub fn with_font_family(mut self, font_family: fonts::FontFamily<fonts::Font>) -> Style {
         self.set_font_family(font_family);
         self
@@ -219,6 +262,14 @@ impl Style {
     }
 
     /// Sets the line spacing factor for this style and returns it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::style::Style;
+    /// let s = Style::new().with_line_spacing(1.5);
+    /// assert!((s.line_spacing() - 1.5).abs() < f32::EPSILON);
+    /// ```
     pub fn with_line_spacing(mut self, line_spacing: f32) -> Style {
         self.set_line_spacing(line_spacing);
         self
@@ -230,6 +281,14 @@ impl Style {
     }
 
     /// Sets the font size in points for this style and returns it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::style::Style;
+    /// let s = Style::new().with_font_size(18);
+    /// assert_eq!(s.font_size(), 18);
+    /// ```
     pub fn with_font_size(mut self, font_size: u8) -> Style {
         self.set_font_size(font_size);
         self

@@ -55,6 +55,15 @@ pub struct Mm(f32);
 
 impl Mm {
     /// Returns the maximum of this value and the given value.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::Mm;
+    /// let a = Mm::from(10.0);
+    /// let b = Mm::from(20.0);
+    /// assert_eq!(a.max(b), b);
+    /// ```
     pub fn max(self, other: Mm) -> Mm {
         Mm(self.0.max(other.0))
     }
@@ -162,6 +171,14 @@ pub struct Position {
 
 impl Position {
     /// Creates a new position from the given coordinates.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::Position;
+    /// let p = Position::new(1.0, 2.0);
+    /// assert_eq!(p.x, genpdfi_extended::Mm::from(1.0));
+    /// ```
     pub fn new(x: impl Into<Mm>, y: impl Into<Mm>) -> Position {
         Position {
             x: x.into(),
@@ -184,6 +201,14 @@ pub struct Rotation {
 
 impl Rotation {
     /// Creates a new rotation with the given number of degrees.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::Rotation;
+    /// let r = Rotation::from_degrees(370.0);
+    /// assert_eq!(r.degrees().unwrap(), 10.0);
+    /// ```
     pub fn from_degrees(degrees: f32) -> Self {
         let degrees = degrees % 360.0;
         let degrees = if degrees > 180.0 {
@@ -238,6 +263,15 @@ impl Default for Scale {
 
 impl Scale {
     /// Creates a new scale for the given x/y values.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::Scale;
+    /// let s = Scale::new(2.0, 3.0);
+    /// assert_eq!(s.x, 2.0);
+    /// assert_eq!(s.y, 3.0);
+    /// ```
     pub fn new(x: impl Into<f32>, y: impl Into<f32>) -> Scale {
         Scale {
             x: x.into(),

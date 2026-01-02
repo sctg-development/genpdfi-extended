@@ -229,6 +229,17 @@ impl Renderer {
     }
 
     /// Loads the builtin font and returns a reference to it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::Size;
+    /// use printpdf::BuiltinFont;
+    /// let r = Renderer::new(Size::new(210.0, 297.0), "ex").expect("renderer");
+    /// let f = r.add_builtin_font(BuiltinFont::Helvetica).expect("builtin");
+    /// match f { genpdfi_extended::render::IndirectFontRef::Builtin(_) => {}, _ => panic!("expected builtin") }
+    /// ```
     pub fn add_builtin_font(
         &self,
         builtin: printpdf::BuiltinFont,
@@ -238,6 +249,21 @@ impl Renderer {
     }
 
     /// Loads an embedded font from the given data and returns a reference to it.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::Size;
+    /// // Add a font from bundled bytes
+    /// let mut r = Renderer::new(Size::new(210.0, 297.0), "ex").expect("renderer");
+    /// let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf"));
+    /// let font_ref = r.add_embedded_font(data).expect("add font");
+    /// match font_ref {
+    ///     genpdfi_extended::render::IndirectFontRef::External(_) => {}
+    ///     _ => panic!("expected external font"),
+    /// }
+    /// ```
     pub fn add_embedded_font(&mut self, data: &[u8]) -> Result<IndirectFontRef, Error> {
         let mut warnings = Vec::new();
         let parsed = printpdf::ParsedFont::from_bytes(data, 0, &mut warnings)
@@ -247,6 +273,17 @@ impl Renderer {
     }
 
     /// Writes this PDF document to a writer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::Size;
+    /// let r = Renderer::new(Size::new(210.0, 297.0), "ex").expect("renderer");
+    /// let mut buf = Vec::new();
+    /// r.write(&mut buf).expect("write");
+    /// assert!(!buf.is_empty());
+    /// ```
     pub fn write(mut self, w: impl io::Write) -> Result<(), Error> {
         // Assemble pages from our internal representation into the PDF document
         for page in &self.pages {
@@ -335,12 +372,38 @@ impl Page {
     }
 
     /// Adds a new layer with the given name to the page.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::Size;
+    ///
+    /// let mut r = Renderer::new(Size::new(210.0, 297.0), "ex").expect("renderer");
+    /// let page = r.get_page_mut(0).expect("page");
+    /// assert_eq!(page.layer_count(), 1);
+    /// page.add_layer("Extra");
+    /// assert!(page.layer_count() >= 2);
+    /// ```
     pub fn add_layer(&mut self, name: impl Into<String>) {
         let layer = printpdf::Layer::new(&name.into());
         self.layers.push_with_obj(layer);
     }
 
     /// Renvoie le nombre de couches présentes sur la page.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::Size;
+    ///
+    /// let mut r = Renderer::new(Size::new(210.0, 297.0), "ex").expect("renderer");
+    /// let page = r.get_page_mut(0).expect("page");
+    /// assert_eq!(page.layer_count(), 1);
+    /// page.add_layer("L2");
+    /// assert!(page.layer_count() >= 2);
+    /// ```
     pub fn layer_count(&self) -> usize {
         self.layers.len()
     }
@@ -349,11 +412,38 @@ impl Page {
     ///
     /// La valeur retournée est un wrapper `Layer` qui permet d'accéder aux fonctionnalités
     /// de dessin de la couche.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::Size;
+    ///
+    /// let r = Renderer::new(Size::new(210.0, 297.0), "ex").expect("renderer");
+    /// let page = r.get_page(0).expect("page");
+    /// let layer = page.get_layer(0).expect("layer");
+    /// let _area = layer.area();
+    /// ```
     pub fn get_layer(&self, idx: usize) -> Option<Layer<'_>> {
         self.layers.get(idx).map(|l| Layer::new(self, l))
     }
 
     /// Retourne la première couche de la page.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::Size;
+    ///
+    /// let r = Renderer::new(Size::new(210.0, 297.0), "ex").expect("renderer");
+    /// let page = r.get_page(0).expect("page");
+    /// let first = page.first_layer();
+    /// let last = page.last_layer();
+    /// // On obtient au moins une couche et les aires sont accessibles
+    /// let _a = first.area();
+    /// let _b = last.area();
+    /// ```
     pub fn first_layer(&self) -> Layer<'_> {
         Layer::new(self, self.layers.first())
     }
@@ -465,6 +555,19 @@ impl<'p> Layer<'p> {
     }
 
     /// Returns a drawable area for this layer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::Size;
+    ///
+    /// let mut r = Renderer::new(Size::new(210.0, 297.0), "ex").expect("renderer");
+    /// let layer = r.get_page(0).unwrap().first_layer();
+    /// let mut area = layer.area();
+    /// area.set_size(Size::new(50.0, 40.0));
+    /// assert_eq!(area.size().width, genpdfi_extended::Mm::from(50.0));
+    /// ```
     pub fn area(&self) -> Area<'p> {
         Area::new(self.clone(), Position::default(), self.page.size)
     }
@@ -852,6 +955,18 @@ impl<'p> Area<'p> {
     /// The returned vector has the same number of elements as the provided slice.  The width of
     /// the *i*-th area is *width \* weights[i] / total_weight*, where *width* is the width of this
     /// area, and *total_weight* is the sum of all given weights.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::Size;
+    ///
+    /// let r = Renderer::new(Size::new(210.0, 297.0), "ex").expect("renderer");
+    /// let area = r.get_page(0).unwrap().first_layer().area();
+    /// let parts = area.split_horizontally(&[1usize, 2usize]);
+    /// assert_eq!(parts.len(), 2);
+    /// ```
     pub fn split_horizontally(&self, weights: &[usize]) -> Vec<Area<'p>> {
         let total_weight: usize = weights.iter().sum();
         let factor = self.size.width / total_weight as f32;
@@ -931,6 +1046,29 @@ impl<'p> Area<'p> {
     /// The given style is only used to calculate the line height of the section.  The position is
     /// relative to the upper left corner of the area.  The font cache must contain the PDF font
     /// for all fonts printed with the text section.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::Size;
+    /// use genpdfi_extended::fonts::{FontCache, FontData, FontFamily};
+    /// use genpdfi_extended::style::Style;
+    ///
+    /// // Use the bundled TTF to create a FontCache for the example
+    /// let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+    /// let fd = FontData::new(data.clone(), None).expect("font data");
+    /// let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+    /// let cache = FontCache::new(family);
+    /// let mut r = Renderer::new(Size::new(210.0, 297.0), "ex").expect("renderer");
+    /// // metrics from style
+    /// use genpdfi_extended::Position;
+    /// let style = Style::new().with_font_family(cache.default_font_family());
+    /// let metrics = style.metrics(&cache);
+    /// let area = r.get_page(0).unwrap().first_layer().area();
+    /// let sec = area.text_section(&cache, Position::default(), metrics);
+    /// assert!(sec.is_some());
+    /// ```
     pub fn text_section<'f>(
         &self,
         font_cache: &'f fonts::FontCache,
@@ -1235,46 +1373,66 @@ impl<'f, 'p> Drop for TextSection<'f, 'p> {
     }
 }
 
+const WIN_ANSI_EXT: &[(u32, u8)] = &[
+    (0x20AC, 0x80), // EURO SIGN
+    (0x0000, 0x81), // undefined (0x81 not used in Win1252)
+    (0x201A, 0x82),
+    (0x0192, 0x83),
+    (0x201E, 0x84),
+    (0x2026, 0x85),
+    (0x2020, 0x86),
+    (0x2021, 0x87),
+    (0x02C6, 0x88),
+    (0x2030, 0x89),
+    (0x0160, 0x8A),
+    (0x2039, 0x8B),
+    (0x0152, 0x8C),
+    (0x0000, 0x8D), // undefined
+    (0x017D, 0x8E),
+    (0x0000, 0x8F), // undefined
+    (0x0000, 0x90), // undefined
+    (0x2018, 0x91),
+    (0x2019, 0x92),
+    (0x201C, 0x93),
+    (0x201D, 0x94),
+    (0x2022, 0x95),
+    (0x2013, 0x96),
+    (0x2014, 0x97),
+    (0x02DC, 0x98),
+    (0x2122, 0x99),
+    (0x0161, 0x9A),
+    (0x203A, 0x9B),
+    (0x0153, 0x9C),
+    (0x0000, 0x9D), // undefined
+    (0x017E, 0x9E),
+    (0x0178, 0x9F),
+];
+
 /// Encodes the given string using the Windows-1252 encoding for use with built-in PDF fonts,
 /// returning an error if it contains unsupported characters.
 fn encode_win1252(s: &str) -> Result<Vec<u16>, Error> {
+    // Windows-1252 mapping for the control range 0x80..=0x9F (byte -> Unicode scalar value).
+    // This reproduces the WIN_ANSI_ENCODING table from lopdf for this range.
+
     // Implement Windows-1252 encoding locally to avoid depending on lopdf internal API changes.
     // Map Unicode characters to single-byte Windows-1252 values where possible.
     let mut out: Vec<u16> = Vec::with_capacity(s.len());
     for c in s.chars() {
-        let b = match c as u32 {
-            0x00..=0x7F => Some(c as u8),
-            0xA0..=0xFF => Some(c as u8),
-            0x20AC => Some(0x80), // EURO SIGN
-            0x201A => Some(0x82),
-            0x0192 => Some(0x83),
-            0x201E => Some(0x84),
-            0x2026 => Some(0x85),
-            0x2020 => Some(0x86),
-            0x2021 => Some(0x87),
-            0x02C6 => Some(0x88),
-            0x2030 => Some(0x89),
-            0x0160 => Some(0x8A),
-            0x2039 => Some(0x8B),
-            0x0152 => Some(0x8C),
-            0x017D => Some(0x8E),
-            0x2018 => Some(0x91),
-            0x2019 => Some(0x92),
-            0x201C => Some(0x93),
-            0x201D => Some(0x94),
-            0x2022 => Some(0x95),
-            0x2013 => Some(0x96),
-            0x2014 => Some(0x97),
-            0x02DC => Some(0x98),
-            0x2122 => Some(0x99),
-            0x0161 => Some(0x9A),
-            0x203A => Some(0x9B),
-            0x0153 => Some(0x9C),
-            0x017E => Some(0x9E),
-            0x0178 => Some(0x9F),
-            _ => None,
+        let code = c as u32;
+        // ASCII and direct 0xA0..0xFF range map to same byte value.
+        let b_opt = if code <= 0x7F {
+            Some(code as u8)
+        } else if (0xA0..=0xFF).contains(&code) {
+            Some(code as u8)
+        } else {
+            // Search the extended mapping table for the corresponding byte.
+            WIN_ANSI_EXT
+                .iter()
+                .find(|(cp, _)| *cp == code)
+                .and_then(|(_, b)| if *b == 0x00 { None } else { Some(*b) })
         };
-        if let Some(b) = b {
+
+        if let Some(b) = b_opt {
             out.push(u16::from(b));
         } else {
             return Err(Error::new(
@@ -1288,6 +1446,30 @@ fn encode_win1252(s: &str) -> Result<Vec<u16>, Error> {
     }
     Ok(out)
 }
+
+/// Encodes the given string using the Windows-1252 encoding for use with built-in PDF fonts,
+/// returning an error if it contains unsupported characters.
+// fn _original_encode_win1252(s: &str) -> Result<Vec<u16>, Error> {
+//     let encoder = lopdf::Encoding::OneByteEncoding(WIN_ANSI_ENCODING);
+//     let bytes: Vec<_> = lopdf::Document::encode_text(&encoder, s)
+//         .into_iter()
+//         .map(u16::from)
+//         .collect();
+
+//     // Windows-1252 is a single-byte encoding, so one byte is one character.
+//     if bytes.len() != s.chars().count() {
+//         Err(Error::new(
+//             format!(
+//                 "Tried to print a string with characters that are not supported by the \
+//                 Windows-1252 encoding with a built-in font: {}",
+//                 s
+//             ),
+//             ErrorKind::UnsupportedEncoding,
+//         ))
+//     } else {
+//         Ok(bytes)
+//     }
+// }
 
 #[cfg(test)]
 mod tests {
@@ -1305,6 +1487,61 @@ mod tests {
         let s = "Hello ☺";
         let res = encode_win1252(s);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_encode_win1252_full_mapping_roundtrip() {
+        // For each byte in 0..=255, build the corresponding Unicode character (if defined by
+        // the Windows-1252 WIN_ANSI mapping) and assert that encoding that character produces
+        // the original byte.
+        fn byte_to_char(b: u8) -> Option<char> {
+            match b {
+                0x00..=0x1F => None,
+                0x20..=0x7F => std::char::from_u32(b as u32),
+                0x80 => std::char::from_u32(0x20AC),
+                0x81 => None,
+                0x82 => std::char::from_u32(0x201A),
+                0x83 => std::char::from_u32(0x0192),
+                0x84 => std::char::from_u32(0x201E),
+                0x85 => std::char::from_u32(0x2026),
+                0x86 => std::char::from_u32(0x2020),
+                0x87 => std::char::from_u32(0x2021),
+                0x88 => std::char::from_u32(0x02C6),
+                0x89 => std::char::from_u32(0x2030),
+                0x8A => std::char::from_u32(0x0160),
+                0x8B => std::char::from_u32(0x2039),
+                0x8C => std::char::from_u32(0x0152),
+                0x8D => None,
+                0x8E => std::char::from_u32(0x017D),
+                0x8F => None,
+                0x90 => None,
+                0x91 => std::char::from_u32(0x2018),
+                0x92 => std::char::from_u32(0x2019),
+                0x93 => std::char::from_u32(0x201C),
+                0x94 => std::char::from_u32(0x201D),
+                0x95 => std::char::from_u32(0x2022),
+                0x96 => std::char::from_u32(0x2013),
+                0x97 => std::char::from_u32(0x2014),
+                0x98 => std::char::from_u32(0x02DC),
+                0x99 => std::char::from_u32(0x2122),
+                0x9A => std::char::from_u32(0x0161),
+                0x9B => std::char::from_u32(0x203A),
+                0x9C => std::char::from_u32(0x0153),
+                0x9D => None,
+                0x9E => std::char::from_u32(0x017E),
+                0x9F => std::char::from_u32(0x0178),
+                0xA0..=0xFF => std::char::from_u32(b as u32),
+            }
+        }
+
+        for b in 0u8..=255u8 {
+            if let Some(ch) = byte_to_char(b) {
+                let s = ch.to_string();
+                let enc = encode_win1252(&s).expect(&format!("should encode byte 0x{:02X}", b));
+                assert_eq!(enc.len(), 1);
+                assert_eq!(enc[0], u16::from(b));
+            }
+        }
     }
 
     #[test]

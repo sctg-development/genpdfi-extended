@@ -355,10 +355,20 @@ pub struct Text {
 
 impl Text {
     /// Creates a new instance with the given styled string.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::elements::Text;
+    /// let t = Text::new("hello");
+    /// assert!(format!("{:?}", t).contains("Text"));
+    /// ```
     pub fn new(text: impl Into<StyledString>) -> Text {
         Text { text: text.into() }
     }
 }
+
+/// A multi-line wrapped paragraph of formatted text.
 
 impl Element for Text {
     fn render(
@@ -480,6 +490,16 @@ impl Paragraph {
     }
 
     /// Adds a string with the given style to the end of this paragraph and returns the paragraph.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::elements::Paragraph;
+    /// use genpdfi_extended::style::Style;
+    /// let mut p = Paragraph::new("start");
+    /// p.push_link("click", "https://example.com", Style::new());
+    /// p.push("more");
+    /// ```
     pub fn push_link(
         &mut self,
         text: impl Into<String>,
