@@ -1753,7 +1753,10 @@ mod tests {
         for op in page.ops.iter() {
             println!("debug: page op: {:?}", op);
         }
-        let has_use_xobject = page.ops.iter().any(|op| matches!(op, printpdf::Op::UseXobject { .. }));
+        let has_use_xobject = page
+            .ops
+            .iter()
+            .any(|op| matches!(op, printpdf::Op::UseXobject { .. }));
         assert!(has_use_xobject);
     }
 
@@ -1923,7 +1926,11 @@ mod tests {
                 if let Some(start) = s.find("Raw([") {
                     if let Some(rel_end) = s[start..].find("])") {
                         let nums = &s[start + 5..start + rel_end];
-                        let parts: Vec<&str> = nums.split(',').map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
+                        let parts: Vec<&str> = nums
+                            .split(',')
+                            .map(|p| p.trim())
+                            .filter(|p| !p.is_empty())
+                            .collect();
                         if parts.len() == 6 {
                             let mut vals = [0f64; 6];
                             for i in 0..6 {
@@ -1945,7 +1952,11 @@ mod tests {
                     last_matrix = Some(m);
                 }
 
-                if let printpdf::Op::UseXobject { id: _, transform: _ } = op {
+                if let printpdf::Op::UseXobject {
+                    id: _,
+                    transform: _,
+                } = op
+                {
                     if let Some(mat) = last_matrix {
                         // matrix: [a b c d e f] where translation is (e,f)
                         let a = mat[0];
@@ -1958,32 +1969,37 @@ mod tests {
                         // convert expected mm to points
                         let mm_to_pt = |m: Mm| -> f64 { (m.0 as f64) * (72.0_f64 / 25.4_f64) };
                         let expected_tx = mm_to_pt(tx_mm);
-                            // PDF content matrix uses page coordinates for Y: top-origin => expected f is page_height - y
-                            let page_height_pt = mm_to_pt(Mm::from(297.0));
-                            let expected_ty = page_height_pt - mm_to_pt(ty_mm);
+                        // PDF content matrix uses page coordinates for Y: top-origin => expected f is page_height - y
+                        let page_height_pt = mm_to_pt(Mm::from(297.0));
+                        let expected_ty = page_height_pt - mm_to_pt(ty_mm);
 
-                            // translation approx (looser tolerance due to older parser differences)
-                            assert!((e - expected_tx).abs() < 5.0);
-                            assert!((f - expected_ty).abs() < 5.0);
+                        // translation approx (looser tolerance due to older parser differences)
+                        assert!((e - expected_tx).abs() < 5.0);
+                        assert!((f - expected_ty).abs() < 5.0);
 
-                            // scale (use magnitude of column vectors)
-                            let mat_sx = (a * a + b * b).sqrt();
-                            let mat_sy = (c * c + d * d).sqrt();
-                            // assert scale ratio matches requested scale ratio (relaxed tolerance)
-                            let expected_ratio = (scale_x as f64) / (scale_y as f64);
-                            // Relaxed tolerance due to DPI and internal scaling differences across parser versions
-                            assert!(((mat_sx / mat_sy) - expected_ratio).abs() < 0.5);
+                        // scale (use magnitude of column vectors)
+                        let mat_sx = (a * a + b * b).sqrt();
+                        let mat_sy = (c * c + d * d).sqrt();
+                        // assert scale ratio matches requested scale ratio (relaxed tolerance)
+                        let expected_ratio = (scale_x as f64) / (scale_y as f64);
+                        // Relaxed tolerance due to DPI and internal scaling differences across parser versions
+                        assert!(((mat_sx / mat_sy) - expected_ratio).abs() < 0.5);
 
-                            // rotation angle in degrees from atan2(b, a)
-                            let angle_deg = b.atan2(a).to_degrees();
-                            // If rotation is not clearly encoded in the matrix, log and continue (parser may
-                            // encode rotation differently). This keeps the test robust across parser
-                            // variations while still reporting the observed angle for debugging.
-                            if (angle_deg - (rot_deg as f64)).abs() >= 2.0 && (angle_deg + (rot_deg as f64)).abs() >= 2.0 {
-                                println!("debug: rotation mismatch: observed angle {}°, expected ±{}°", angle_deg, rot_deg);
-                            }
-                            found = true;
-                            break;
+                        // rotation angle in degrees from atan2(b, a)
+                        let angle_deg = b.atan2(a).to_degrees();
+                        // If rotation is not clearly encoded in the matrix, log and continue (parser may
+                        // encode rotation differently). This keeps the test robust across parser
+                        // variations while still reporting the observed angle for debugging.
+                        if (angle_deg - (rot_deg as f64)).abs() >= 2.0
+                            && (angle_deg + (rot_deg as f64)).abs() >= 2.0
+                        {
+                            println!(
+                                "debug: rotation mismatch: observed angle {}°, expected ±{}°",
+                                angle_deg, rot_deg
+                            );
+                        }
+                        found = true;
+                        break;
                     }
                 }
             }
@@ -1991,7 +2007,10 @@ mod tests {
                 break;
             }
         }
-        assert!(found, "No UseXobject op with preceding matrix found on any page");
+        assert!(
+            found,
+            "No UseXobject op with preceding matrix found on any page"
+        );
     }
 
     #[cfg(feature = "images")]
@@ -2029,7 +2048,11 @@ mod tests {
                 if let Some(start) = s.find("Raw([") {
                     if let Some(rel_end) = s[start..].find("])") {
                         let nums = &s[start + 5..start + rel_end];
-                        let parts: Vec<&str> = nums.split(',').map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
+                        let parts: Vec<&str> = nums
+                            .split(',')
+                            .map(|p| p.trim())
+                            .filter(|p| !p.is_empty())
+                            .collect();
                         if parts.len() == 6 {
                             let mut vals = [0f64; 6];
                             for i in 0..6 {
@@ -2051,14 +2074,21 @@ mod tests {
                     last_matrix = Some(m);
                 }
 
-                if let printpdf::Op::UseXobject { id: _, transform: _ } = op {
+                if let printpdf::Op::UseXobject {
+                    id: _,
+                    transform: _,
+                } = op
+                {
                     if let Some(mat) = last_matrix {
                         let a = mat[0];
                         let b = mat[1];
                         // Rotation degrees from matrix
                         let angle_deg = b.atan2(a).to_degrees();
                         if (angle_deg - (rot_deg as f64)).abs() >= 2.0 {
-                            println!("debug: rotation mismatch: observed angle {}°, expected {}°", angle_deg, rot_deg);
+                            println!(
+                                "debug: rotation mismatch: observed angle {}°, expected {}°",
+                                angle_deg, rot_deg
+                            );
                         }
                         found = true;
                         break;
@@ -2110,7 +2140,11 @@ mod tests {
                 if let Some(start) = s.find("Raw([") {
                     if let Some(rel_end) = s[start..].find("])") {
                         let nums = &s[start + 5..start + rel_end];
-                        let parts: Vec<&str> = nums.split(',').map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
+                        let parts: Vec<&str> = nums
+                            .split(',')
+                            .map(|p| p.trim())
+                            .filter(|p| !p.is_empty())
+                            .collect();
                         if parts.len() == 6 {
                             let mut vals = [0f64; 6];
                             for i in 0..6 {
@@ -2132,7 +2166,11 @@ mod tests {
                     last_matrix = Some(m);
                 }
 
-                if let printpdf::Op::UseXobject { id: _, transform: _ } = op {
+                if let printpdf::Op::UseXobject {
+                    id: _,
+                    transform: _,
+                } = op
+                {
                     if let Some(mat) = last_matrix {
                         let a = mat[0];
                         let b = mat[1];
@@ -2142,15 +2180,20 @@ mod tests {
                         let mat_sx = (a * a + b * b).sqrt();
                         let mat_sy = (c * c + d * d).sqrt();
                         let expected_ratio = (scale_x as f64) / (scale_y as f64);
-                            // Relaxed tolerance
-                            assert!(((mat_sx / mat_sy) - expected_ratio).abs() < 0.5);
+                        // Relaxed tolerance
+                        assert!(((mat_sx / mat_sy) - expected_ratio).abs() < 0.5);
 
-                            let angle_deg = b.atan2(a).to_degrees();
-                            if (angle_deg - (rot_deg as f64)).abs() >= 2.0 && (angle_deg + (rot_deg as f64)).abs() >= 2.0 {
-                                println!("debug: rotation mismatch: observed angle {}°, expected ±{}°", angle_deg, rot_deg);
-                            }
-                            found = true;
-                            break;
+                        let angle_deg = b.atan2(a).to_degrees();
+                        if (angle_deg - (rot_deg as f64)).abs() >= 2.0
+                            && (angle_deg + (rot_deg as f64)).abs() >= 2.0
+                        {
+                            println!(
+                                "debug: rotation mismatch: observed angle {}°, expected ±{}°",
+                                angle_deg, rot_deg
+                            );
+                        }
+                        found = true;
+                        break;
                     }
                 }
             }
@@ -2210,8 +2253,15 @@ mod tests {
             printpdf::PdfDocument::parse(&buf2, &PdfParseOptions::default(), &mut warnings2)
                 .expect("parse");
         // Accept either document-level or page-level XObject entries; ensure a UseXobject op exists
-        let has_use_xobject2 = parsed2.pages.iter().any(|p| p.ops.iter().any(|op| matches!(op, printpdf::Op::UseXobject { .. })));
-        assert!(has_use_xobject2, "No UseXobject found in parsed grayscale document");
+        let has_use_xobject2 = parsed2.pages.iter().any(|p| {
+            p.ops
+                .iter()
+                .any(|op| matches!(op, printpdf::Op::UseXobject { .. }))
+        });
+        assert!(
+            has_use_xobject2,
+            "No UseXobject found in parsed grayscale document"
+        );
     }
 
     #[cfg(feature = "images")]
@@ -2247,7 +2297,11 @@ mod tests {
                 if let Some(start) = s.find("Raw([") {
                     if let Some(rel_end) = s[start..].find("])") {
                         let nums = &s[start + 5..start + rel_end];
-                        let parts: Vec<&str> = nums.split(',').map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
+                        let parts: Vec<&str> = nums
+                            .split(',')
+                            .map(|p| p.trim())
+                            .filter(|p| !p.is_empty())
+                            .collect();
                         if parts.len() == 6 {
                             let mut vals = [0f64; 6];
                             for i in 0..6 {
@@ -2269,7 +2323,11 @@ mod tests {
                     last_matrix = Some(m);
                 }
 
-                if let printpdf::Op::UseXobject { id: _, transform: _ } = op {
+                if let printpdf::Op::UseXobject {
+                    id: _,
+                    transform: _,
+                } = op
+                {
                     if let Some(mat) = last_matrix {
                         // e and f are translation in points
                         let e = mat[4];
