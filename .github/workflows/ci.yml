@@ -51,7 +51,8 @@ jobs:
         run: cargo test --features images --verbose
 
       - name: Generate coverage (Tarpaulin)
-        run: cargo tarpaulin --out Xml --output-dir coverage
+        continue-on-error: true
+        run: cargo tarpaulin --out Xml --output-dir coverage --features images
 
       - name: Upload cobertura artifact
         uses: actions/upload-artifact@v4
@@ -81,12 +82,13 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           source $HOME/.cargo/env
           rustup default stable
+          rustup install nightly
           rustup component add rustfmt clippy
         env:
           CARGO_HOME: ${{ runner.temp }}/cargo_home
 
       - name: Build docs
-        run: RUSTDOCFLAGS="--static-root-path /genpdfi-extended" cargo doc --no-deps
+        run: RUSTDOCFLAGS="-Z unstable-options --static-root-path /genpdfi-extended" cargo +nightly doc --no-deps
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
