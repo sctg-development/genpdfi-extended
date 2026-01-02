@@ -96,9 +96,12 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// Creates a new PDF document renderer with one page of the given size and the given title.
+    /// Crée un nouveau rendu PDF avec une page initiale de la taille donnée et un titre.
     ///
-    /// # Example
+    /// La méthode initialise un document `printpdf` et y ajoute une page et une couche
+    /// par défaut nommée "Layer 1". Elle renvoie une erreur si la création échoue.
+    ///
+    /// # Exemple
     /// ```
     /// use genpdfi_extended::render::Renderer;
     /// use genpdfi_extended::Size;
@@ -142,25 +145,33 @@ impl Renderer {
         })
     }
 
-    /// Sets the PDF conformance for the generated PDF document.
+    /// Définit la conformance PDF (p. ex. PDF/A) pour le document généré.
+    ///
+    /// L'option est appliquée au moment de l'enregistrement du document.
     pub fn with_conformance(mut self, conformance: printpdf::PdfConformance) -> Self {
         self.conformance = Some(conformance);
         self
     }
 
-    /// Sets the creation date for the generated PDF document.
+    /// Définit la date de création qui sera inscrite dans les métadonnées du PDF.
+    ///
+    /// La valeur est conservée et appliquée lors de la sauvegarde du document.
     pub fn with_creation_date(mut self, date: printpdf::OffsetDateTime) -> Self {
         self.creation_date = Some(date);
         self
     }
 
-    /// Sets the modification date for the generated PDF document.
+    /// Définit la date de dernière modification pour les métadonnées du PDF.
+    ///
+    /// À utiliser pour forcer la date de modification enregistrée dans le fichier.
     pub fn with_modification_date(mut self, date: printpdf::OffsetDateTime) -> Self {
         self.modification_date = Some(date);
         self
     }
 
-    /// Adds a new page with the given size to the document.
+    /// Ajoute une nouvelle page de la taille donnée au document.
+    ///
+    /// Une couche par défaut (`Layer 1`) est créée pour la nouvelle page.
     pub fn add_page(&mut self, size: impl Into<Size>) {
         let size = size.into();
         let layer = printpdf::Layer::new("Layer 1");
@@ -179,37 +190,39 @@ impl Renderer {
         self.pages.push(Page::new(page_idx, layer_id, size))
     }
 
-    /// Returns the number of pages in this document.
+    /// Renvoie le nombre de pages présentes dans le document en cours.
     pub fn page_count(&self) -> usize {
         self.pages.len()
     }
 
-    /// Returns a page of this document.
+    /// Retourne une référence immuable vers la page à l'index donné, ou `None` si hors
+    /// plage.
     pub fn get_page(&self, idx: usize) -> Option<&Page> {
         self.pages.get(idx)
     }
 
-    /// Returns a mutable reference to a page of this document.
+    /// Retourne une référence mutable vers la page à l'index donné, ou `None` si hors
+    /// plage. Permet de modifier la page (ajout de couches, etc.).
     pub fn get_page_mut(&mut self, idx: usize) -> Option<&mut Page> {
         self.pages.get_mut(idx)
     }
 
-    /// Returns a mutable reference to the first page of this document.
+    /// Retourne une référence immuable vers la première page du document.
     pub fn first_page(&self) -> &Page {
         &self.pages[0]
     }
 
-    /// Returns the first page of this document.
+    /// Retourne une référence mutable vers la première page du document.
     pub fn first_page_mut(&mut self) -> &mut Page {
         &mut self.pages[0]
     }
 
-    /// Returns the last page of this document.
+    /// Retourne une référence immuable vers la dernière page du document.
     pub fn last_page(&self) -> &Page {
         &self.pages[self.pages.len() - 1]
     }
 
-    /// Returns a mutable reference to the last page of this document.
+    /// Retourne une référence mutable vers la dernière page du document.
     pub fn last_page_mut(&mut self) -> &mut Page {
         let idx = self.pages.len() - 1;
         &mut self.pages[idx]
@@ -248,6 +261,18 @@ impl Renderer {
                     let id = self.doc.add_layer(&layer_obj);
                     layer.layer_id = id;
                 }
+
+                // Register any XObjects (images/forms) that were attached to this layer.
+                for (id, xobj) in layer.xobjects.iter() {
+                    // Insert directly into the document resource map so that the XObjectId used
+                    // by the `UseXobject` op matches the resource key.
+                    self.doc
+                        .resources
+                        .xobjects
+                        .map
+                        .insert(id.clone(), xobj.clone());
+                }
+
                 new_ops.push(printpdf::Op::BeginLayer {
                     layer_id: layer.layer_id.clone(),
                 });
@@ -315,22 +340,25 @@ impl Page {
         self.layers.push_with_obj(layer);
     }
 
-    /// Returns the number of layers on this page.
+    /// Renvoie le nombre de couches présentes sur la page.
     pub fn layer_count(&self) -> usize {
         self.layers.len()
     }
 
-    /// Returns a layer of this page.
+    /// Retourne la couche à l'index fourni si elle existe, sinon `None`.
+    ///
+    /// La valeur retournée est un wrapper `Layer` qui permet d'accéder aux fonctionnalités
+    /// de dessin de la couche.
     pub fn get_layer(&self, idx: usize) -> Option<Layer<'_>> {
         self.layers.get(idx).map(|l| Layer::new(self, l))
     }
 
-    /// Returns the first layer of this page.
+    /// Retourne la première couche de la page.
     pub fn first_layer(&self) -> Layer<'_> {
         Layer::new(self, self.layers.first())
     }
 
-    /// Returns the last layer of this page.
+    /// Retourne la dernière couche de la page.
     pub fn last_layer(&self) -> Layer<'_> {
         Layer::new(self, self.layers.last())
     }
@@ -349,6 +377,7 @@ impl Page {
 struct Layers(cell::RefCell<Vec<rc::Rc<cell::RefCell<LayerData>>>>);
 
 impl Layers {
+    /// Crée une nouvelle collection de couches en initialisant la première couche fournie.
     pub fn new(layer_id: printpdf::LayerInternalId) -> Self {
         Self(
             vec![rc::Rc::from(cell::RefCell::new(LayerData::from_id(
@@ -358,34 +387,43 @@ impl Layers {
         )
     }
 
+    /// Renvoie le nombre de couches connues.
     pub fn len(&self) -> usize {
         self.0.borrow().len()
     }
 
+    /// Retourne la première couche (en `Rc`).
     pub fn first(&self) -> rc::Rc<cell::RefCell<LayerData>> {
         self.0.borrow().first().unwrap().clone()
     }
 
+    /// Retourne la dernière couche (en `Rc`).
     pub fn last(&self) -> rc::Rc<cell::RefCell<LayerData>> {
         self.0.borrow().last().unwrap().clone()
     }
 
+    /// Retourne la couche à l'index donné, si existante.
     pub fn get(&self, idx: usize) -> Option<rc::Rc<cell::RefCell<LayerData>>> {
         self.0.borrow().get(idx).cloned()
     }
 
+    /// Ajoute une couche à la collection en fournissant un objet `printpdf::Layer` et
+    /// renvoie sa `Rc`.
     pub fn push_with_obj(&self, layer_obj: printpdf::Layer) -> rc::Rc<cell::RefCell<LayerData>> {
         let layer_data = rc::Rc::from(cell::RefCell::new(LayerData::from_obj(layer_obj)));
         self.0.borrow_mut().push(layer_data.clone());
         layer_data
     }
 
+    /// Ajoute une couche à la collection en fournissant un `LayerInternalId` et
+    /// renvoie sa `Rc`.
     pub fn push_id(&self, layer_id: printpdf::LayerInternalId) -> rc::Rc<cell::RefCell<LayerData>> {
         let layer_data = rc::Rc::from(cell::RefCell::new(LayerData::from_id(layer_id)));
         self.0.borrow_mut().push(layer_data.clone());
         layer_data
     }
 
+    /// Renvoie la couche suivant celle passée en argument, si elle existe.
     pub fn next(
         &self,
         layer: &cell::RefCell<LayerData>,
@@ -431,6 +469,15 @@ impl<'p> Layer<'p> {
         Area::new(self.clone(), Position::default(), self.page.size)
     }
 
+    /// Adds an image to this layer by converting it to a `RawImage`, storing it as an
+    /// XObject local to this layer, and emitting a `UseXobject` operation referencing the
+    /// reserved XObject id.
+    ///
+    /// Notes:
+    /// - Images with alpha channels are ignored (alpha handling is not supported).
+    /// - The actual `XObject` is kept in `LayerData::xobjects` until document serialization,
+    ///   at which point it is registered into the document resources so the `UseXobject` op
+    ///   references a valid resource id.
     #[cfg(feature = "images")]
     fn add_image(
         &self,
@@ -440,9 +487,76 @@ impl<'p> Layer<'p> {
         rotation: Rotation,
         dpi: Option<f32>,
     ) {
-        // Image embedding is handled at PDF serialization time in printpdf 0.8.
-        // For now, this is a no-op (image feature handling will be implemented as needed).
-        let _ = (image, position, scale, rotation, dpi);
+        // Convert the dynamic image into a printpdf::RawImage and keep it in the layer until
+        // serialization. We reject images with alpha earlier in Image::from_dynamic_image, but
+        // check defensively here as well.
+        if image.color().has_alpha() {
+            return; // silently ignore / don't embed alpha images
+        }
+
+        // Obtain pixel data and format
+        let (width, height) = image.dimensions();
+        let width = width as usize;
+        let height = height as usize;
+
+        // Prefer RGB8 if possible, otherwise grayscale
+        let (pixels, format) = match image.color() {
+            image::ColorType::L8 | image::ColorType::La8 => {
+                // grayscale
+                let gray = image.to_luma8();
+                (
+                    printpdf::RawImageData::U8(gray.into_raw()),
+                    printpdf::RawImageFormat::R8,
+                )
+            }
+            _ => {
+                // Use RGB8
+                let rgb = image.to_rgb8();
+                (
+                    printpdf::RawImageData::U8(rgb.into_raw()),
+                    printpdf::RawImageFormat::RGB8,
+                )
+            }
+        };
+
+        let raw = printpdf::RawImage {
+            pixels,
+            width,
+            height,
+            data_format: format,
+            tag: Vec::new(),
+        };
+
+        // Create an XObject and store it with a new id on the layer for later registration
+        let xobj = printpdf::XObject::Image(raw);
+        let xobj_id = printpdf::XObjectId::new();
+        self.data
+            .borrow_mut()
+            .xobjects
+            .push((xobj_id.clone(), xobj));
+
+        // Compute the transform: translate to user-space (lower-left origin), scale and rotate
+        let pdf_point: printpdf::Point = self.transform_position(position).into();
+
+        let rotate = printpdf::XObjectRotation {
+            angle_ccw_degrees: -rotation.degrees, // our Rotation is clockwise; XObjectRotation uses CCW
+            rotation_center_x: printpdf::Px((width as i64) / 2),
+            rotation_center_y: printpdf::Px((height as i64) / 2),
+        };
+
+        let transform = printpdf::XObjectTransform {
+            translate_x: Some(pdf_point.x),
+            translate_y: Some(pdf_point.y),
+            rotate: Some(rotate),
+            scale_x: Some(scale.x),
+            scale_y: Some(scale.y),
+            dpi,
+        };
+
+        self.data.borrow_mut().ops.push(printpdf::Op::UseXobject {
+            id: xobj_id,
+            transform,
+        });
     }
 
     fn add_line_shape<I>(&self, points: I)
@@ -549,17 +663,50 @@ impl<'p> Layer<'p> {
         }
     }
 
-    fn write_positioned_codepoints<P, C>(&self, positions: P, codepoints: C)
-    where
+    /// Emits positioned codepoints with kerning for an *external* PDF font.
+    ///
+    /// `positions` are the kerning/offset values expressed in *thousandths* of an em
+    /// (matching the convention used in the font kerning helper). Positive values move
+    /// the next glyph to the right, negative values to the left. `codepoints` are the
+    /// font-specific glyph ids, and `chars` is the original character sequence for
+    /// diagnostic/clarity purposes; the emitted op contains a `(pos, glyph_id, char)`
+    /// tuple for each glyph.
+    fn write_positioned_codepoints<P, C, I>(
+        &self,
+        font: printpdf::FontId,
+        positions: P,
+        codepoints: C,
+        chars: I,
+    ) where
         P: IntoIterator<Item = i64>,
         C: IntoIterator<Item = u16>,
+        I: IntoIterator<Item = char>,
     {
-        // Position-aware codepoint writing requires knowing which external font is active.
-        // This is non-trivial to track in the current abstraction, so it's left as a no-op for now.
-        let _ = (
-            positions.into_iter().collect::<Vec<_>>(),
-            codepoints.into_iter().collect::<Vec<_>>(),
-        );
+        let mut it_pos = positions.into_iter();
+        let mut it_cp = codepoints.into_iter();
+        let mut it_ch = chars.into_iter();
+        let mut cpk: Vec<(i64, u16, char)> = Vec::new();
+        loop {
+            match (it_pos.next(), it_cp.next(), it_ch.next()) {
+                (Some(p), Some(cp), Some(ch)) => cpk.push((p, cp, ch)),
+                (None, None, None) => break,
+                _ => {
+                    // mismatched lengths; stop building — the inputs should ideally have the
+                    // same length but we avoid panicking here to be defensive.
+                    break;
+                }
+            }
+        }
+        if !cpk.is_empty() {
+            // Emit the WriteCodepointsWithKerning op to record precise glyph positions and
+            // kerning. `cpk` is a vector of (offset, glyph id, char) tuples where `offset`
+            // is in thousandths of an em (following the convention used by the font kerning
+            // calculation in `Font`).
+            self.data
+                .borrow_mut()
+                .ops
+                .push(printpdf::Op::WriteCodepointsWithKerning { font, cpk });
+        }
     }
     /// Transforms the given position that is relative to the upper left corner of the layer to a
     /// position that is relative to the lower left corner of the layer (as used by `printpdf`).
@@ -581,6 +728,8 @@ struct LayerData {
     layer_id: printpdf::LayerInternalId,
     layer_obj: Option<printpdf::Layer>,
     ops: Vec<printpdf::Op>,
+    /// XObjects (images, forms) specific to this layer, stored until serialization
+    xobjects: Vec<(printpdf::XObjectId, printpdf::XObject)>,
     fill_color: cell::Cell<Color>,
     outline_color: cell::Cell<Color>,
     outline_thickness: cell::Cell<Mm>,
@@ -592,6 +741,7 @@ impl LayerData {
             layer_id,
             layer_obj: None,
             ops: Vec::new(),
+            xobjects: Vec::new(),
             fill_color: Color::Rgb(0, 0, 0).into(),
             outline_color: Color::Rgb(0, 0, 0).into(),
             outline_thickness: Mm::from(printpdf::Pt(1.0)).into(),
@@ -603,6 +753,7 @@ impl LayerData {
             layer_id: printpdf::LayerInternalId::new(),
             layer_obj: Some(layer),
             ops: Vec::new(),
+            xobjects: Vec::new(),
             fill_color: Color::Rgb(0, 0, 0).into(),
             outline_color: Color::Rgb(0, 0, 0).into(),
             outline_thickness: Mm::from(printpdf::Pt(1.0)).into(),
@@ -910,10 +1061,13 @@ impl<'f, 'p> TextSection<'f, 'p> {
         self.area.layer.set_fill_color(style.color());
         self.set_font(&pdf_font, style.font_size());
 
-        // For built-in fonts, emit text as whole words/strings to avoid character-by-character spacing
-        if font.is_builtin() {
-            let items = vec![printpdf::TextItem::Text(s.to_string())];
-            if let IndirectFontRef::Builtin(b) = pdf_font {
+        // Decide based on the actual PDF font we obtained from the font cache.  Prefer
+        // emitting positioned codepoints for external fonts so kerning/offsets are exact.
+        match pdf_font {
+            IndirectFontRef::Builtin(b) => {
+                // Built-in fonts are emitted as whole text items to avoid relying on
+                // per-glyph positioning (PDF viewers handle spacing for built-ins).
+                let items = vec![printpdf::TextItem::Text(s.to_string())];
                 self.area
                     .layer
                     .data
@@ -921,27 +1075,19 @@ impl<'f, 'p> TextSection<'f, 'p> {
                     .ops
                     .push(printpdf::Op::WriteTextBuiltinFont { items, font: b });
             }
-        } else {
-            // For embedded fonts, we still need precise positioning for proper kerning
-            let kerning_positions = font.kerning(self.font_cache, s.chars());
-            let positions: Vec<i64> = kerning_positions
-                .clone()
-                .into_iter()
-                .map(|pos| (-pos * 1000.0) as i64)
-                .collect();
-            let codepoints = font.glyph_ids(&self.font_cache, s.chars());
-            if let IndirectFontRef::External(fid) = pdf_font {
-                self.area.layer.data.borrow_mut().ops.push(
-                    printpdf::Op::WriteCodepointsWithKerning {
-                        font: fid,
-                        cpk: positions
-                            .into_iter()
-                            .zip(codepoints.into_iter())
-                            .zip(s.chars())
-                            .map(|((pos, cp), ch)| (pos, cp, ch))
-                            .collect(),
-                    },
-                );
+            IndirectFontRef::External(fid) => {
+                // For external (embedded) PDF fonts, emit positioned codepoints so we have
+                // exact control over kerning and per-glyph offsets.
+                let kerning_positions = font.kerning(self.font_cache, s.chars());
+                let positions: Vec<i64> = kerning_positions
+                    .clone()
+                    .into_iter()
+                    .map(|pos| (-pos * 1000.0) as i64)
+                    .collect();
+                let codepoints = font.glyph_ids(&self.font_cache, s.chars());
+                self.area
+                    .layer
+                    .write_positioned_codepoints(fid, positions, codepoints, s.chars());
             }
         }
 
@@ -1046,20 +1192,27 @@ impl<'f, 'p> TextSection<'f, 'p> {
                     .push(printpdf::Op::WriteTextBuiltinFont { items, font: b });
             }
         } else {
-            // For embedded fonts, emit positioned codepoints with kerning
-            if let IndirectFontRef::External(fid) = pdf_font {
-                let cpk: Vec<(i64, u16, char)> = positions
-                    .into_iter()
-                    .zip(codepoints.into_iter())
-                    .zip(text.chars())
-                    .map(|((pos, cp), ch)| (pos, cp, ch))
-                    .collect();
-                self.area
-                    .layer
-                    .data
-                    .borrow_mut()
-                    .ops
-                    .push(printpdf::Op::WriteCodepointsWithKerning { font: fid, cpk });
+            // Prefer emitting positioned codepoints when we have an external PDF font
+            match pdf_font {
+                IndirectFontRef::Builtin(b) => {
+                    let items = vec![printpdf::TextItem::Text(text.to_string())];
+                    if let IndirectFontRef::Builtin(b2) = pdf_font {
+                        self.area
+                            .layer
+                            .data
+                            .borrow_mut()
+                            .ops
+                            .push(printpdf::Op::WriteTextBuiltinFont { items, font: b2 });
+                    }
+                }
+                IndirectFontRef::External(fid) => {
+                    self.area.layer.write_positioned_codepoints(
+                        fid,
+                        positions,
+                        codepoints,
+                        text.chars(),
+                    );
+                }
             }
         }
 
@@ -1312,6 +1465,49 @@ mod tests {
         assert!(!res);
     }
 
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_add_image_creates_xobject_and_transform() {
+        use image::{DynamicImage, Rgb, RgbImage};
+        use printpdf::PdfParseOptions;
+
+        // create a simple 2x2 red image
+        let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(2, 2, Rgb([255, 0, 0])));
+
+        let mut r = Renderer::new(Size::new(210.0, 297.0), "imgtest").expect("renderer");
+        let area = r.first_page().first_layer().area();
+
+        // insert image at (10mm, 20mm) with default scale/rotation
+        area.add_image(
+            &img,
+            Position::new(Mm::from(10.0), Mm::from(20.0)),
+            Scale::new(1.0, 1.0),
+            Rotation::new(0.0),
+            Some(300.0),
+        );
+
+        // write to bytes
+        let mut buf = Vec::new();
+        r.write(&mut buf).expect("write");
+
+        // parse the produced PDF and inspect xobjects and ops
+        let mut warnings = Vec::new();
+        let parsed = printpdf::PdfDocument::parse(&buf, &PdfParseOptions::default(), &mut warnings)
+            .expect("parse");
+        assert!(!parsed.resources.xobjects.map.is_empty());
+        assert!(!parsed.pages.is_empty());
+
+        // ensure the page contains a UseXobject op with a transform
+        let page = &parsed.pages[0];
+        let has_use_xobject = page.ops.iter().any(|op| match op {
+            printpdf::Op::UseXobject { id: _, transform } => {
+                transform.translate_x.is_some() && transform.translate_y.is_some()
+            }
+            _ => false,
+        });
+        assert!(has_use_xobject);
+    }
+
     #[test]
     fn test_text_section_add_newline() {
         use crate::fonts::{FontCache, FontData, FontFamily};
@@ -1343,5 +1539,370 @@ mod tests {
             .text_section(&cache, Position::default(), metrics)
             .expect("should create section");
         assert!(section.add_newline());
+    }
+
+    #[test]
+    fn test_write_positioned_codepoints_matches_kerning() {
+        use crate::fonts::{FontCache, FontData, FontFamily};
+        use crate::style::Style;
+        use printpdf::PdfParseOptions;
+
+        let s = "AVoi"; // contains pairs that often have kerning
+
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
+        let fd = FontData::new(data.clone(), None).expect("font data");
+        let family = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
+        let mut cache = FontCache::new(family);
+
+        let mut r = Renderer::new(Size::new(210.0, 297.0), "kp").expect("renderer");
+        cache.load_pdf_fonts(&mut r).expect("load fonts");
+
+        let area = r.first_page().first_layer().area();
+        let style = Style::new().with_font_family(cache.default_font_family());
+
+        // Sanity-check: ensure this style/font is embedded (not builtin)
+        let font_ref = style.font(&cache);
+        assert!(
+            !font_ref.is_builtin(),
+            "expected embedded font for this test"
+        );
+        let pdf_font = cache.get_pdf_font(font_ref).expect("have pdf font");
+        match pdf_font {
+            IndirectFontRef::External(_) => {}
+            IndirectFontRef::Builtin(_) => panic!("expected external pdf font"),
+        }
+
+        // Print the string using the normal API
+        assert!(area
+            .print_str(&cache, Position::default(), style, s)
+            .unwrap());
+
+        // Check in-memory ops first
+        let layer_ops = area.layer.data.borrow().ops.clone();
+        let has_in_memory = layer_ops
+            .iter()
+            .any(|op| matches!(op, printpdf::Op::WriteCodepointsWithKerning { .. }));
+        assert!(
+            has_in_memory,
+            "expected WriteCodepointsWithKerning already present in layer ops"
+        );
+
+        // Inspect in-memory layer ops for the WriteCodepointsWithKerning op and verify content
+        let layer_ops = area.layer.data.borrow().ops.clone();
+        let mut found = false;
+        for op in layer_ops.iter() {
+            if let printpdf::Op::WriteCodepointsWithKerning { font: _, cpk } = op {
+                let font = style.font(&cache);
+                let kerning_positions: Vec<i64> = font
+                    .kerning(&cache, s.chars())
+                    .into_iter()
+                    .map(|p| (-p * 1000.0) as i64)
+                    .collect();
+                let codepoints: Vec<u16> = font.glyph_ids(&cache, s.chars());
+                let chars: Vec<char> = s.chars().collect();
+                assert_eq!(cpk.len(), chars.len());
+                for (i, (p, cp, ch)) in cpk.iter().enumerate() {
+                    assert_eq!(*p, kerning_positions[i]);
+                    assert_eq!(*cp, codepoints[i]);
+                    assert_eq!(*ch, chars[i]);
+                }
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "no WriteCodepointsWithKerning op found in memory");
+
+        // Save and parse (to ensure serialization doesn't crash)
+        let mut buf = Vec::new();
+        r.write(&mut buf).expect("write");
+        let mut warnings = Vec::new();
+        let _parsed =
+            printpdf::PdfDocument::parse(&buf, &PdfParseOptions::default(), &mut warnings)
+                .expect("parse");
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_add_image_transform_values() {
+        use image::{DynamicImage, Rgb, RgbImage};
+        use printpdf::PdfParseOptions;
+
+        // small 3x4 image
+        let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(3, 4, Rgb([10, 20, 30])));
+
+        let mut r = Renderer::new(Size::new(210.0, 297.0), "imgvals").expect("renderer");
+        let area = r.first_page().first_layer().area();
+
+        let scale_x = 2.0f32;
+        let scale_y = 3.0f32;
+        let rot_deg = 30.0f32;
+        let dpi = Some(150.0f32);
+        let tx_mm = Mm::from(15.0);
+        let ty_mm = Mm::from(25.0);
+
+        area.add_image(
+            &img,
+            Position::new(tx_mm, ty_mm),
+            Scale::new(scale_x, scale_y),
+            Rotation::new(rot_deg),
+            dpi,
+        );
+
+        let mut buf = Vec::new();
+        r.write(&mut buf).expect("write");
+
+        let mut warnings = Vec::new();
+        let parsed = printpdf::PdfDocument::parse(&buf, &PdfParseOptions::default(), &mut warnings)
+            .expect("parse");
+
+        // find first UseXobject op and assert transform values
+        let mut found = false;
+        for page in parsed.pages.iter() {
+            for op in page.ops.iter() {
+                if let printpdf::Op::UseXobject { id: _, transform } = op {
+                    // translate values should be present
+                    assert!(transform.translate_x.is_some());
+                    assert!(transform.translate_y.is_some());
+                    let tx = transform.translate_x.unwrap();
+                    let ty = transform.translate_y.unwrap();
+                    // compare approx (units are in Mm/Pt depending on serialization)
+                    assert!((tx.0 - tx_mm.0).abs() < 0.5);
+                    assert!((ty.0 - ty_mm.0).abs() < 0.5);
+
+                    // scale
+                    assert!(transform.scale_x.is_some());
+                    assert!(transform.scale_y.is_some());
+                    assert!((transform.scale_x.unwrap() - scale_x).abs() < 1e-6);
+                    assert!((transform.scale_y.unwrap() - scale_y).abs() < 1e-6);
+
+                    // dpi
+                    assert_eq!(transform.dpi, dpi);
+
+                    // rotation
+                    if let Some(rot) = &transform.rotate {
+                        assert!((rot.angle_ccw_degrees - rot_deg).abs() < 1e-6);
+                    } else {
+                        panic!("expected rotation");
+                    }
+
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                break;
+            }
+        }
+        assert!(found, "No UseXobject op found on any page");
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_add_image_negative_rotation_and_no_dpi() {
+        use image::{DynamicImage, Rgb, RgbImage};
+        use printpdf::PdfParseOptions;
+
+        let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(4, 4, Rgb([1, 2, 3])));
+        let mut r = Renderer::new(Size::new(210.0, 297.0), "imgneg").expect("renderer");
+        let area = r.first_page().first_layer().area();
+
+        let rot_deg = -45.0f32;
+        area.add_image(
+            &img,
+            Position::new(Mm::from(5.0), Mm::from(5.0)),
+            Scale::new(1.0, 1.0),
+            Rotation::new(rot_deg),
+            None,
+        );
+
+        let mut buf = Vec::new();
+        r.write(&mut buf).expect("write");
+
+        let mut warnings = Vec::new();
+        let parsed = printpdf::PdfDocument::parse(&buf, &PdfParseOptions::default(), &mut warnings)
+            .expect("parse");
+
+        let mut found = false;
+        for page in parsed.pages.iter() {
+            for op in page.ops.iter() {
+                if let printpdf::Op::UseXobject { id: _, transform } = op {
+                    assert!(transform.dpi.is_none());
+                    if let Some(rot) = &transform.rotate {
+                        assert!((rot.angle_ccw_degrees - rot_deg).abs() < 1e-6);
+                    } else {
+                        panic!("expected rotation");
+                    }
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                break;
+            }
+        }
+        assert!(found, "No UseXobject found");
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_add_image_rotation_center_and_scale_variants() {
+        use image::{DynamicImage, Rgb, RgbImage};
+        use printpdf::PdfParseOptions;
+
+        let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(5, 7, Rgb([9, 8, 7])));
+        let mut r = Renderer::new(Size::new(210.0, 297.0), "imgcenter").expect("renderer");
+        let area = r.first_page().first_layer().area();
+
+        let scale_x = 0.5f32;
+        let scale_y = 4.0f32;
+        let rot_deg = 15.0f32;
+
+        area.add_image(
+            &img,
+            Position::new(Mm::from(0.0), Mm::from(0.0)),
+            Scale::new(scale_x, scale_y),
+            Rotation::new(rot_deg),
+            Some(72.0),
+        );
+
+        let mut buf = Vec::new();
+        r.write(&mut buf).expect("write");
+
+        let mut warnings = Vec::new();
+        let parsed = printpdf::PdfDocument::parse(&buf, &PdfParseOptions::default(), &mut warnings)
+            .expect("parse");
+
+        let mut found = false;
+        for page in parsed.pages.iter() {
+            for op in page.ops.iter() {
+                if let printpdf::Op::UseXobject { id: _, transform } = op {
+                    assert!(transform.scale_x.is_some());
+                    assert!(transform.scale_y.is_some());
+                    assert!((transform.scale_x.unwrap() - scale_x).abs() < 1e-6);
+                    assert!((transform.scale_y.unwrap() - scale_y).abs() < 1e-6);
+
+                    if let Some(rot) = &transform.rotate {
+                        // rotation center should be width/2 and height/2
+                        assert_eq!(rot.rotation_center_x.0, (5u32 / 2) as i64);
+                        assert_eq!(rot.rotation_center_y.0, (7u32 / 2) as i64);
+                        assert!((rot.angle_ccw_degrees - rot_deg).abs() < 1e-6);
+                    } else {
+                        panic!("expected rotation");
+                    }
+
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                break;
+            }
+        }
+        assert!(found, "No UseXobject found");
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_add_image_alpha_rejected_and_grayscale_ok() {
+        use image::{DynamicImage, GrayImage, Luma, Rgba, RgbaImage};
+        use printpdf::PdfParseOptions;
+
+        // alpha image should be ignored
+        let aimg = DynamicImage::ImageRgba8(RgbaImage::from_pixel(2, 2, Rgba([1, 2, 3, 4])));
+        let mut r = Renderer::new(Size::new(210.0, 297.0), "imgalpha").expect("renderer");
+        let area = r.first_page().first_layer().area();
+        area.add_image(
+            &aimg,
+            Position::new(Mm::from(0.0), Mm::from(0.0)),
+            Scale::new(1.0, 1.0),
+            Rotation::new(0.0),
+            None,
+        );
+        let mut buf = Vec::new();
+        r.write(&mut buf).expect("write");
+        let mut warnings = Vec::new();
+        let parsed = printpdf::PdfDocument::parse(&buf, &PdfParseOptions::default(), &mut warnings)
+            .expect("parse");
+        // no xobjects expected
+        assert!(
+            parsed.resources.xobjects.map.is_empty()
+                || !parsed.pages.iter().any(|p| p
+                    .ops
+                    .iter()
+                    .any(|op| matches!(op, printpdf::Op::UseXobject { .. })))
+        );
+
+        // grayscale should be accepted
+        let gimg = DynamicImage::ImageLuma8(GrayImage::from_pixel(3, 3, Luma([128])));
+        let mut r2 = Renderer::new(Size::new(210.0, 297.0), "imggray").expect("renderer");
+        let area2 = r2.first_page().first_layer().area();
+        area2.add_image(
+            &gimg,
+            Position::new(Mm::from(1.0), Mm::from(1.0)),
+            Scale::new(1.0, 1.0),
+            Rotation::new(0.0),
+            None,
+        );
+        let mut buf2 = Vec::new();
+        r2.write(&mut buf2).expect("write");
+        let mut warnings2 = Vec::new();
+        let parsed2 =
+            printpdf::PdfDocument::parse(&buf2, &PdfParseOptions::default(), &mut warnings2)
+                .expect("parse");
+        assert!(!parsed2.resources.xobjects.map.is_empty());
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_add_image_negative_translation() {
+        use image::{DynamicImage, Rgb, RgbImage};
+        use printpdf::PdfParseOptions;
+
+        let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(2, 2, Rgb([5, 6, 7])));
+        let mut r = Renderer::new(Size::new(210.0, 297.0), "imgnegtrans").expect("renderer");
+        let area = r.first_page().first_layer().area();
+
+        area.add_image(
+            &img,
+            Position::new(Mm::from(-10.0), Mm::from(-20.0)),
+            Scale::new(1.0, 1.0),
+            Rotation::new(0.0),
+            None,
+        );
+
+        let mut buf = Vec::new();
+        r.write(&mut buf).expect("write");
+        let mut warnings = Vec::new();
+        let parsed = printpdf::PdfDocument::parse(&buf, &PdfParseOptions::default(), &mut warnings)
+            .expect("parse");
+
+        let mut found = false;
+        for page in parsed.pages.iter() {
+            for op in page.ops.iter() {
+                if let printpdf::Op::UseXobject { id: _, transform } = op {
+                    assert!(transform.translate_x.is_some());
+                    assert!(transform.translate_y.is_some());
+                    let tx = transform.translate_x.unwrap();
+                    let ty = transform.translate_y.unwrap();
+                    assert!((tx.0 - (-10.0)).abs() < 0.5);
+                    assert!((ty.0 - (-20.0)).abs() < 0.5);
+                    found = true;
+                    break;
+                }
+            }
+            if found {
+                break;
+            }
+        }
+        assert!(found, "No UseXobject found");
     }
 }
