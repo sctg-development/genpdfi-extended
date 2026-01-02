@@ -587,7 +587,7 @@ impl Document {
         if let Some(modification_date) = self.modification_date {
             renderer = renderer.with_modification_date(modification_date);
         }
-        self.context.font_cache.load_pdf_fonts(&renderer)?;
+        self.context.font_cache.load_pdf_fonts(&mut renderer)?;
         loop {
             let mut area = renderer.last_page().last_layer().area();
             if let Some(decorator) = &mut self.decorator {

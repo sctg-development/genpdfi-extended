@@ -28,7 +28,7 @@ version = "0.8"
 optional = true
 
 [dependencies.printpdf]
-version = "0.7.0"
+version = "0.8.2"
 default-features = false
 
 [dependencies.derive_more]
@@ -47,7 +47,15 @@ features = ["embed_en-us"]
 
 [features]
 default = []
-images = ["image", "printpdf/embedded_images"]
+images = [
+    "image",
+    "printpdf/gif",
+    "printpdf/jpeg",
+    "printpdf/png",
+    "image/webp",
+    "image/bmp",
+    "image/tiff",
+]
 
 [package.metadata.docs.rs]
 all-features = true

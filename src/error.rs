@@ -79,11 +79,10 @@ impl error::Error for Error {
             ErrorKind::PageSizeExceeded => None,
             ErrorKind::UnsupportedEncoding => None,
             ErrorKind::IoError(err) => Some(err),
-            ErrorKind::PdfError(err) => Some(err),
-            ErrorKind::PdfIndexError(err) => Some(err),
-            ErrorKind::FaceParsingError(err) => Some(err),
+            ErrorKind::PdfError(_err) => None,
             #[cfg(feature = "images")]
             ErrorKind::ImageError(err) => Some(err),
+            _ => None,
         }
     }
 }
@@ -105,12 +104,7 @@ pub enum ErrorKind {
     /// An IO error.
     IoError(io::Error),
     /// An error caused by invalid data in `printpdf`.
-    PdfError(printpdf::PdfError),
-    /// An error caused by an invalid index in `printpdf`.
-    PdfIndexError(printpdf::IndexError),
-
-    /// An error caused by face parsing in `printpdf`.
-    FaceParsingError(printpdf::Error),
+    PdfError(String),
     /// An error caused by `image`.
     ///
     /// *Only available if the `images` feature is enabled.*
@@ -124,28 +118,15 @@ impl From<io::Error> for ErrorKind {
     }
 }
 
-impl From<printpdf::Error> for ErrorKind {
-    fn from(error: printpdf::Error) -> ErrorKind {
-        match error {
-            printpdf::Error::Io(err) => err.into(),
-            printpdf::Error::Pdf(err) => err.into(),
-            printpdf::Error::Index(err) => err.into(),
-            printpdf::Error::FaceParsing(err) => {
-                ErrorKind::FaceParsingError(printpdf::Error::FaceParsing(err))
-            }
-        }
-    }
-}
-
-impl From<printpdf::IndexError> for ErrorKind {
-    fn from(error: printpdf::IndexError) -> ErrorKind {
-        ErrorKind::PdfIndexError(error)
-    }
-}
-
-impl From<printpdf::PdfError> for ErrorKind {
-    fn from(error: printpdf::PdfError) -> ErrorKind {
+impl From<String> for ErrorKind {
+    fn from(error: String) -> ErrorKind {
         ErrorKind::PdfError(error)
+    }
+}
+
+impl From<&str> for ErrorKind {
+    fn from(error: &str) -> ErrorKind {
+        ErrorKind::PdfError(error.to_string())
     }
 }
 
