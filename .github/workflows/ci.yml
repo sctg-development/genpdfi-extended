@@ -96,7 +96,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
       - name: Build docs
-        run: RUSTDOCFLAGS="-Z unstable-options --static-root-path /genpdfi-extended" cargo +nightly doc --no-deps
+        run: RUSTDOCFLAGS="-Z unstable-options --static-root-path /genpdfi-extended/" cargo +nightly doc --no-deps
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v4
