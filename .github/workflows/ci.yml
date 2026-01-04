@@ -74,7 +74,6 @@ jobs:
           CODECOV_SLUG: sctg-development/genpdfi-extended
 
   docs:
-    needs: build-and-test
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
     steps:
