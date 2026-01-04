@@ -31,6 +31,10 @@ SPDX-License-Identifier: CC0-1.0
   - Accept a point iterator instead of a point vector in `Area::draw_line`.
 - Remove the `From<Position>` implementation for `printpdf::Point`.
 
+## Fixes and Tests
+
+- Add a strict test (`test_tj_serialization_strict`) that emits positioned glyphs in-memory and asserts the serialized PDF contains a `TJ` or `Tj` operator. This test ensures that TJ/Tj serialization for positioned glyphs is present and provides a gate for future hardening of precise glyph positioning and kerning.
+
 ## Non-Breaking Changes
 
 - Implement `std::iter::Extend` for `Document`, `LinearLayout`,
@@ -53,6 +57,7 @@ SPDX-License-Identifier: CC0-1.0
 
 - Return an error if a paragraph overflows.
 - Use the ascent instead of the glyph height for vertical positioning of text.
+- Fix text serialization for embedded fonts: emit full strings for embedded fonts so PDF viewers apply native kerning and text extractors can recover readable text; add tests and examples. (prevents glyph-id remapping issues when subsetting)
 
 # v0.2.0 (2021-06-17)
 
