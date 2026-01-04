@@ -19,14 +19,14 @@ use ttf_parser::Face;
 /// * `Err(Error)` - If subsetting fails
 ///
 /// # Example
-/// ```rust,no_run
+/// ```rust
 /// use genpdfi_extended::subsetting::subset_font;
-///
-/// let font_data = std::fs::read("font.ttf").unwrap();
+/// use std::path::PathBuf;
+/// let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+/// p.push("fonts/NotoSans-Regular.ttf");
+/// let font_data = std::fs::read(&p).unwrap();
 /// let text = "Hello World ăâîșț";  // Romanian characters
 /// let subset = subset_font(&font_data, text).unwrap();
-///
-/// // subset now contains a smaller font with only the used glyphs
 /// assert!(subset.len() < font_data.len());
 /// ```
 pub fn subset_font(font_data: &[u8], text: &str) -> Result<Vec<u8>, Error> {

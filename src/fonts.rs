@@ -348,12 +348,13 @@ impl FontData {
     /// * `false` if the character is missing (will render as .notdef/missing glyph)
     ///
     /// # Example
-    /// ```rust,no_run
+    /// ```rust
     /// # use genpdfi_extended::fonts::FontData;
-    /// # let font_data = FontData::load("font.ttf", None).unwrap();
-    /// if font_data.has_glyph('ă') {
-    ///     println!("Font supports Romanian characters!");
-    /// }
+    /// # use std::path::PathBuf;
+    /// let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    /// p.push("fonts/NotoSans-Regular.ttf");
+    /// let font_data = FontData::load(&p, None).unwrap();
+    /// assert!(font_data.has_glyph('ă'));
     /// ```
     pub fn has_glyph(&self, c: char) -> bool {
         // In rusttype, glyph ID 0 is the .notdef glyph (missing character indicator)
@@ -373,14 +374,14 @@ impl FontData {
     /// A `GlyphCoverage` struct containing coverage statistics and missing characters
     ///
     /// # Example
-    /// ```rust,no_run
+    /// ```rust
     /// # use genpdfi_extended::fonts::FontData;
-    /// # let font_data = FontData::load("font.ttf", None).unwrap();
+    /// # use std::path::PathBuf;
+    /// let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    /// p.push("fonts/NotoSans-Regular.ttf");
+    /// let font_data = FontData::load(&p, None).unwrap();
     /// let coverage = font_data.check_coverage("Hello ăâîșț!");
-    /// println!("Coverage: {:.1}%", coverage.coverage_percent());
-    /// if !coverage.is_complete() {
-    ///     println!("Missing characters: {:?}", coverage.missing_chars());
-    /// }
+    /// assert!(coverage.coverage_percent() > 0.0);
     /// ```
     pub fn check_coverage(&self, text: &str) -> GlyphCoverage {
         let mut missing_chars = Vec::new();
@@ -451,21 +452,20 @@ impl GlyphCoverage {
 /// it automatically selects the appropriate font for each character based on glyph coverage.
 ///
 /// # Example
-/// ```rust,no_run
-/// use genpdfi_extended::fonts::{FontData, FontFallbackChain};
+/// ```rust
+/// # use genpdfi_extended::fonts::{FontData, FontFallbackChain};
+/// # use std::path::PathBuf;
+/// let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+/// p.push("fonts/NotoSans-Regular.ttf");
+/// let primary = FontData::load(&p, None).unwrap();
+/// let mut q = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+/// q.push("fonts/SpaceMono-Regular.ttf");
+/// let fallback = FontData::load(&q, None).unwrap();
 ///
-/// let primary = FontData::load("NotoSans.ttf", None).unwrap();
-/// let cyrillic = FontData::load("NotoSansCyrillic.ttf", None).unwrap();
-/// let emoji = FontData::load("NotoEmoji.ttf", None).unwrap();
+/// let chain = FontFallbackChain::new(primary).with_fallback(fallback);
 ///
-/// let chain = FontFallbackChain::new(primary)
-///     .with_fallback(cyrillic)
-///     .with_fallback(emoji);
-///
-/// // Automatically uses the right font for each character
-/// let font_for_a = chain.find_font_for_char('a');      // Uses primary (Noto Sans)
-/// let font_for_я = chain.find_font_for_char('я');      // Uses cyrillic fallback
-/// let font_for_emoji = chain.find_font_for_char('😀'); // Uses emoji fallback
+/// let segments = chain.segment_text("Hello 123!");
+/// assert!(!segments.is_empty());
 /// ```
 #[derive(Clone, Debug)]
 pub struct FontFallbackChain {
@@ -557,13 +557,18 @@ impl FontFallbackChain {
     /// rendered with the corresponding font.
     ///
     /// # Example
-    /// ```no_run
+    /// ```rust
     /// # use genpdfi_extended::fonts::{FontData, FontFallbackChain};
-    /// # let primary = FontData::load("font.ttf", None).unwrap();
-    /// # let fallback = FontData::load("fallback.ttf", None).unwrap();
+    /// # use std::path::PathBuf;
+    /// let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    /// p.push("fonts/NotoSans-Regular.ttf");
+    /// let primary = FontData::load(&p, None).unwrap();
+    /// let mut q = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    /// q.push("fonts/SpaceMono-Regular.ttf");
+    /// let fallback = FontData::load(&q, None).unwrap();
     /// let chain = FontFallbackChain::new(primary).with_fallback(fallback);
     /// let segments = chain.segment_text("Hello мир!");
-    /// // Returns: [("Hello ", &primary_font), ("мир", &fallback_font), ("!", &primary_font)]
+    /// assert!(!segments.is_empty());
     /// ```
     pub fn segment_text(&self, text: &str) -> Vec<(String, &FontData)> {
         let mut segments = Vec::new();
