@@ -1,7 +1,11 @@
 [package]
 name = "genpdfi_extended"
 version = "0.3.0"
-authors = ["Robin Krahl <robin.krahl@ireas.org>", "Ismael Sh <me@theiskaa.com>"]
+authors = [
+    "Robin Krahl <robin.krahl@ireas.org>",
+    "Ismael Sh <me@theiskaa.com>",
+    "Ronan Le Meillat",
+]
 edition = "2018"
 description = "User-friendly PDF generator written in pure Rust"
 homepage = "https://github.com/theiskaa/genpdfi"
