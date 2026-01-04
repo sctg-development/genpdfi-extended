@@ -346,9 +346,18 @@ mod tests {
         use crate::Context;
 
         // Prepare fonts and context
-        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
         let fd = FontData::new(data.clone(), None).expect("FontData::new failed");
-        let family_data = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let family_data = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
         let mut cache = FontCache::new(family_data);
 
         // Create a small renderer so the area is narrow and text will not fit
@@ -360,7 +369,9 @@ mod tests {
 
         // Long text that clearly doesn't fit => should set has_more
         let mut txt = Text::new("This is a very long string that will not fit in the small area");
-        let res = txt.render(&context, area_small.clone(), Style::new()).expect("render");
+        let res = txt
+            .render(&context, area_small.clone(), Style::new())
+            .expect("render");
         assert!(res.has_more || res.size.width.0 > 0.0);
 
         // Paragraph wrapping: create a paragraph and render in a small area
@@ -1647,6 +1658,52 @@ impl<'a, E: IntoBoxedElement> iter::Extend<E> for TableLayoutRow<'a> {
 ///     .element(elements::Paragraph::new("Cell 2"))
 ///     .push()
 ///     .expect("Invalid table row");
+/// ```
+///
+/// Example: render a simple table using an embedded font from the `fonts/` directory
+/// (this example is runnable in tests and CI because it uses the bundled fonts):
+/// ```rust
+/// use genpdfi_extended::{elements, style, Document, fonts};
+/// // Load a font family from the bundled `fonts/` directory and create a document
+/// let family = fonts::from_files(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts"), "NotoSans", None)
+///     .expect("Failed to load font family");
+/// let mut doc = Document::new(family);
+///
+/// // Construct a simple table and add it to the document
+/// let mut table = elements::TableLayout::new(vec![1, 2]);
+/// table.row()
+///     .element(elements::Paragraph::new("Left cell with embedded font"))
+///     .element(elements::Paragraph::new("Right cell with more width"))
+///     .push().expect("push");
+/// doc.push(table);
+///
+/// // Render to an in-memory buffer (no files written)
+/// let mut buf = Vec::new();
+/// doc.render(&mut buf).expect("render document");
+/// assert!(!buf.is_empty());
+/// ```
+///
+/// Example: render a table using a PDF builtin font (Helvetica) so viewers use device fonts:
+/// ```rust
+/// use genpdfi_extended::{elements, style, Document, fonts};
+/// use genpdfi_extended::fonts::Builtin;
+///
+/// // Load a font family and mark it as a builtin family (metrics are read from files but
+/// // the PDF will reference the builtin font names so viewers can use device fonts).
+/// let family = fonts::from_files(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts"), "SpaceMono", Some(Builtin::Helvetica))
+///     .expect("Failed to load builtin-like family");
+/// let mut doc = Document::new(family);
+///
+/// let mut table = elements::TableLayout::new(vec![1, 1]);
+/// table.row()
+///     .element(elements::Paragraph::new("Left with builtin"))
+///     .element(elements::Paragraph::new("Right with builtin"))
+///     .push().expect("push");
+/// doc.push(table);
+///
+/// let mut buf = Vec::new();
+/// doc.render(&mut buf).expect("render document builtin");
+/// assert!(!buf.is_empty());
 /// ```
 ///
 /// [`CellDecorator`]: trait.CellDecorator.html
