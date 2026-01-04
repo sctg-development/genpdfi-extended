@@ -279,7 +279,7 @@ mod tests {
     use super::{bounding_box_offset_and_size, Image};
     use crate::render::Renderer;
     use crate::Element;
-    use crate::{Position, Rotation, Size};
+    use crate::{Alignment, Mm, Position, Rotation, Size};
     use float_cmp::approx_eq;
 
     macro_rules! assert_approx_eq {
@@ -425,6 +425,39 @@ mod tests {
                 bounding_box_offset_and_size(&rotation, &size).1
             );
         }
+    }
+
+    #[test]
+    fn test_image_from_dynamic_image_alpha_rejected_and_get_size_and_offset() {
+        // create an RGBA image (alpha channel set) and expect rejection
+        let img_rgba =
+            image::DynamicImage::ImageRgba8(image::RgbaImage::from_fn(10, 10, |_, _| {
+                image::Rgba([255, 0, 0, 128])
+            }));
+        assert!(Image::from_dynamic_image(img_rgba).is_err());
+
+        // load a real image from examples and verify get_size and offsets
+        let bytes = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/examples/images/test_image.jpg"
+        ));
+        let dyn_img = image::load_from_memory(bytes).expect("load image");
+        let mut img = Image::from_dynamic_image(dyn_img).expect("from dynamic ok");
+
+        // default dpi and scale should produce positive sizes
+        let size = img.get_size();
+        assert!(size.width.0 > 0.0);
+        assert!(size.height.0 > 0.0);
+
+        // test offsets for different alignments
+        let off_left = img.get_offset(Mm::from(10.0), Mm::from(50.0));
+        assert_eq!(off_left.x.0, 0.0);
+        img.set_alignment(Alignment::Center);
+        let off_center = img.get_offset(Mm::from(10.0), Mm::from(50.0));
+        assert_eq!(off_center.x.0, (50.0 - 10.0) / 2.0);
+        img.set_alignment(Alignment::Right);
+        let off_right = img.get_offset(Mm::from(10.0), Mm::from(50.0));
+        assert_eq!(off_right.x.0, 50.0 - 10.0);
     }
 
     #[test]

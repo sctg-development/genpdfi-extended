@@ -809,6 +809,85 @@ mod tests {
             })
             .is_none());
     }
+
+    #[test]
+    fn test_fontdata_get_data_embedded_and_builtin() {
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
+        // embedded should return the raw bytes
+        let fd_emb = FontData::new(data.clone(), None).expect("embedded font");
+        let raw = fd_emb.get_data().expect("should return raw data");
+        assert_eq!(raw.len(), data.len());
+
+        // builtin should return an error when trying to get raw data
+        let fd_builtin =
+            FontData::new(data, Some(printpdf::BuiltinFont::Helvetica)).expect("builtin font");
+        assert!(fd_builtin.get_data().is_err());
+    }
+
+    #[test]
+    fn test_load_pdf_fonts_and_get_pdf_font() {
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
+        let fd = FontData::new(data.clone(), None).expect("FontData::new failed");
+        let family_data = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
+        let mut cache = FontCache::new(family_data);
+
+        let mut r =
+            crate::render::Renderer::new(crate::Size::new(210.0, 297.0), "ex").expect("renderer");
+        cache.load_pdf_fonts(&mut r).expect("load fonts");
+
+        let f = cache.default_font_family().regular;
+        assert!(cache.get_pdf_font(f).is_some());
+    }
+
+    #[test]
+    fn test_glyph_ids_and_kerning_and_metrics_max() {
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
+        let fd = FontData::new(data.clone(), None).expect("FontData::new failed");
+        let family_data = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
+        let mut cache = FontCache::new(family_data);
+        // add another explicit font and get its Font reference
+        let fref = cache.add_font(fd.clone());
+
+        let ids = fref.glyph_ids(&cache, "Hello".chars());
+        assert_eq!(ids.len(), 5);
+        assert!(ids.iter().all(|&id| id > 0));
+
+        // kerning should return a vector of correct length; values are finite
+        let kern = fref.kerning(&cache, "AV".chars());
+        assert_eq!(kern.len(), 2);
+        assert!(kern.iter().all(|v| v.is_finite()));
+
+        // metrics max
+        let m1 = Metrics::new(Mm::from(1.0), Mm::from(2.0), Mm::from(3.0), Mm::from(4.0));
+        let m2 = Metrics::new(Mm::from(2.0), Mm::from(1.0), Mm::from(4.0), Mm::from(2.0));
+        let mm = m1.max(&m2);
+        assert_eq!(mm.line_height, Mm::from(2.0));
+        assert_eq!(mm.glyph_height, Mm::from(2.0));
+        assert_eq!(mm.ascent, Mm::from(4.0));
+        assert_eq!(mm.descent, Mm::from(4.0));
+    }
 }
 
 /// A reference to a font cached by a [`FontCache`][].

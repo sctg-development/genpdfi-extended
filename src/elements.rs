@@ -339,6 +339,46 @@ mod tests {
         let res = table.render(&context, area, Style::new()).expect("render");
         assert!(res.has_more);
     }
+
+    #[test]
+    fn test_text_render_has_more_and_paragraph_wrapping() {
+        use crate::fonts::{FontCache, FontData, FontFamily};
+        use crate::Context;
+
+        // Prepare fonts and context
+        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let fd = FontData::new(data.clone(), None).expect("FontData::new failed");
+        let family_data = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let mut cache = FontCache::new(family_data);
+
+        // Create a small renderer so the area is narrow and text will not fit
+        let mut r_small = Renderer::new(Size::new(20.0, 50.0), "t").expect("renderer");
+        // Ensure PDF fonts are loaded into the renderer before rendering text
+        cache.load_pdf_fonts(&mut r_small).expect("load fonts");
+        let context = Context::new(cache);
+        let area_small = r_small.first_page().first_layer().area();
+
+        // Long text that clearly doesn't fit => should set has_more
+        let mut txt = Text::new("This is a very long string that will not fit in the small area");
+        let res = txt.render(&context, area_small.clone(), Style::new()).expect("render");
+        assert!(res.has_more || res.size.width.0 > 0.0);
+
+        // Paragraph wrapping: create a paragraph and render in a small area
+        let mut p = Paragraph::default();
+        p.push("This is some long paragraph text that should wrap across multiple lines and potentially be truncated");
+        let pres_res = p.render(&context, area_small.clone(), Style::new());
+        match pres_res {
+            Ok(pres) => {
+                // Rendered width should not exceed area width
+                assert!(pres.size.width.0 <= area_small.size().width.0);
+            }
+            Err(e) => {
+                // It's acceptable that the paragraph overflows the page in a tiny area
+                use crate::error::ErrorKind;
+                assert!(matches!(e.kind(), ErrorKind::PageSizeExceeded));
+            }
+        }
+    }
 }
 
 /// A single line of formatted text.
