@@ -1,4 +1,5 @@
-#![cfg(feature = "images")]
+// This example uses the `images` feature. It is safe to compile without that
+// feature enabled because `main` will early-exit when the feature is not active.
 
 use std::fs;
 use std::path::PathBuf;
@@ -18,6 +19,11 @@ fn main() {
         env!("CARGO_MANIFEST_DIR"),
         "/examples/images/test_image.jpg"
     ));
+    // If the images feature is not enabled, or no image is present, skip the example.
+    if cfg!(not(feature = "images")) {
+        eprintln!("images feature not enabled; skipping example");
+        return;
+    }
     if !img_path.exists() {
         eprintln!("No test image found at {} - copy one to examples/images/test_image.jpg to run this example", img_path.display());
         return;
@@ -88,14 +94,19 @@ fn main() {
             .load_pdf_fonts(&mut r)
             .expect("load builtin fonts");
         let area = r.first_page().first_layer().area();
-        let img = image::open(&img_path).expect("open image");
-        area.add_image(
-            &img,
-            Position::new(Mm::from(x_mm), Mm::from(y_mm)),
-            Scale::new(1.0, 1.0),
-            Rotation::from_degrees(0.0),
-            Some(150.0),
-        );
+        // Use conditional compilation to avoid requiring the `image` crate when the
+        // `images` feature is not enabled. When enabled, load the image and add it to the area.
+        #[cfg(feature = "images")]
+        {
+            let img = image::open(&img_path).expect("open image");
+            area.add_image(
+                &img,
+                Position::new(Mm::from(x_mm), Mm::from(y_mm)),
+                Scale::new(1.0, 1.0),
+                Rotation::from_degrees(0.0),
+                Some(150.0),
+            );
+        }
 
         // Add textual label showing the image position: NotoSans-Regular 20 and SpaceMono-Bold 10
         let mut label = format!("Image position: {:.2}, {:.2} top-left", x_mm, y_mm);

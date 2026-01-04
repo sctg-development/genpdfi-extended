@@ -430,14 +430,17 @@ impl<T: Into<Mm>> From<T> for Margins {
 ///
 /// # Example
 ///
-/// ```no_run
-/// // Load a font from the file system
-/// let font_family = genpdfi_extended::fonts::from_files("./fonts", "LiberationSans", None)
+/// ```rust
+/// use genpdfi_extended::{fonts, elements, Document};
+/// // Create a font family from the bundled fonts and create a simple document
+/// let font_family = fonts::from_files(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts"), "NotoSans", None)
 ///     .expect("Failed to load font family");
-/// // Create a document and set the default font family
-/// let mut doc = genpdfi_extended::Document::new(font_family);
-/// doc.push(genpdfi_extended::elements::Paragraph::new("Document content"));
-/// doc.render_to_file("output.pdf").expect("Failed to render document");
+/// let mut doc = Document::new(font_family);
+/// doc.push(elements::Paragraph::new("Document content"));
+/// // Render to an in-memory buffer (no filesystem side effects in doctest)
+/// let mut buf = Vec::new();
+/// doc.render(&mut buf).expect("Failed to render document");
+/// assert!(!buf.is_empty());
 /// ```
 ///
 /// [`push`]: #method.push

@@ -24,6 +24,151 @@ use crate::error::{Context as _, Error, ErrorKind};
 use crate::fonts;
 use crate::style::{Color, LineStyle, Style};
 use crate::{Margins, Mm, Position, Size};
+use std::io::Write;
+
+// Postprocess helper to replace GENPDFI_CPK markers with TJ arrays using lopdf.
+fn postprocess_tj(buf: &[u8]) -> Result<Vec<u8>, Error> {
+    use lopdf::{Dictionary, Document, Object, Stream};
+
+    let mut doc = Document::load_mem(buf).map_err(|e| {
+        Error::new(
+            format!("Failed to parse PDF for postprocessing: {:?}", e),
+            ErrorKind::PdfError("parse failure".to_string()),
+        )
+    })?;
+
+    let pages = doc.get_pages();
+    for (_pnum, page_id) in pages {
+        let content_data = match doc.get_and_decode_page_content(page_id) {
+            Ok(d) => d,
+            Err(_) => lopdf::content::Content {
+                operations: Vec::new(),
+            },
+        };
+        // encode content to bytes and turn to string for pattern matching
+        let content_bytes = content_data.encode().unwrap_or_default();
+        let content_str = String::from_utf8_lossy(&content_bytes).into_owned();
+        if !content_str.contains("GENPDFI_CPK::") {
+            continue;
+        }
+        let mut new_content = content_str.clone();
+        let mut offset = 0usize;
+        while let Some(pos) = new_content[offset..].find("GENPDFI_CPK::") {
+            let start = offset + pos;
+            if let Some(rel_end) = new_content[start..].find(';') {
+                let end = start + rel_end + 1;
+                let marker = &new_content[start..end];
+                let parts: Vec<&str> = marker.split("::").collect();
+                if parts.len() >= 4 {
+                    let gids_part = parts
+                        .iter()
+                        .find(|p| p.starts_with("GIDS="))
+                        .map(|p| &p[5..])
+                        .unwrap_or("");
+                    let offs_part = parts
+                        .iter()
+                        .find(|p| p.starts_with("OFFS="))
+                        .map(|p| &p[5..])
+                        .unwrap_or("");
+                    let chars_part = parts
+                        .iter()
+                        .find(|p| p.starts_with("CHARS="))
+                        .map(|p| &p[6..])
+                        .unwrap_or("");
+                    let gids: Vec<u16> = if gids_part.is_empty() {
+                        Vec::new()
+                    } else {
+                        gids_part
+                            .split(',')
+                            .filter_map(|s| s.parse::<u16>().ok())
+                            .collect()
+                    };
+                    let offs: Vec<i64> = if offs_part.is_empty() {
+                        Vec::new()
+                    } else {
+                        offs_part
+                            .split(',')
+                            .filter_map(|s| s.parse::<i64>().ok())
+                            .collect()
+                    };
+                    let chars: Vec<char> = if chars_part.is_empty() {
+                        Vec::new()
+                    } else {
+                        chars_part
+                            .split('|')
+                            .filter_map(|s| s.chars().next())
+                            .collect()
+                    };
+
+                    let mut tj_parts: Vec<String> = Vec::new();
+                    for (i, gid) in gids.iter().enumerate() {
+                        let b1 = ((gid >> 8) & 0xff) as u8;
+                        let b2 = (gid & 0xff) as u8;
+                        let hex = format!("<{:02X}{:02X}>", b1, b2);
+                        tj_parts.push(hex);
+                        if let Some(off) = offs.get(i) {
+                            tj_parts.push(format!("{}", off));
+                        }
+                    }
+                    let tj_str = format!("[{}] TJ", tj_parts.join(" "));
+                    new_content = new_content.replacen(marker, &tj_str, 1);
+
+                    if !gids.is_empty() {
+                        let mut cmap = String::new();
+                        cmap.push_str("/CIDInit /ProcSet findresource begin\n12 dict begin\n/Version 1.0 def\n/Length 0 def\n/begincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /GENPDFI def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
+                        cmap.push_str(&format!("{} beginbfchar\n", gids.len()));
+                        for (i, gid) in gids.iter().enumerate() {
+                            let b1 = ((gid >> 8) & 0xff) as u8;
+                            let b2 = (gid & 0xff) as u8;
+                            let src = format!("<{:02X}{:02X}>", b1, b2);
+                            let uni = chars.get(i).map(|c| *c as u32).unwrap_or(0u32);
+                            let dst = format!("<{:04X}>", uni);
+                            cmap.push_str(&format!("{} {}\n", src, dst));
+                        }
+                        cmap.push_str("endbfchar\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
+
+                        let cmap_stream = Stream::new(Dictionary::new(), cmap.into_bytes());
+                        let cmap_id = doc.new_object_id();
+                        doc.objects.insert(cmap_id, Object::Stream(cmap_stream));
+
+                        for (_id, obj) in doc.objects.iter_mut() {
+                            if let Object::Dictionary(ref mut dict) = obj {
+                                match dict.get(b"Type") {
+                                    Ok(&Object::Name(ref name)) if name == b"Font" => {
+                                        dict.set(b"ToUnicode", Object::Reference(cmap_id));
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+
+                    offset = start + tj_parts.join(" ").len();
+                    continue;
+                }
+            }
+            break;
+        }
+
+        if new_content != content_str {
+            let new_stream = Stream::new(Dictionary::new(), new_content.into_bytes());
+            let new_id = doc.new_object_id();
+            doc.objects.insert(new_id, Object::Stream(new_stream));
+            if let Some(Object::Dictionary(ref mut pdict)) = doc.objects.get_mut(&page_id) {
+                pdict.set(b"Contents", Object::Reference(new_id));
+            }
+        }
+    }
+
+    let mut out: Vec<u8> = Vec::new();
+    doc.save_to(&mut out).map_err(|e| {
+        Error::new(
+            format!("Failed to save postprocessed PDF: {:?}", e),
+            ErrorKind::PdfError("save failure".to_string()),
+        )
+    })?;
+    Ok(out)
+}
 
 /// Compatibility wrapper for a font reference (either builtin or external) to adapt to
 /// `printpdf` 0.8 which uses `FontId` for external fonts and `BuiltinFont` for builtin ones.
@@ -117,6 +262,30 @@ impl Renderer {
     /// let layer = page.first_layer();
     /// let area = layer.area();
     /// assert!(area.size().width > Mm::from(0.0));
+    /// ```
+    ///
+    /// # Example: print text using a builtin-equivalent font
+    ///
+    /// ```rust
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::{Size, Mm, Position};
+    /// use genpdfi_extended::fonts::{FontData, FontFamily, FontCache};
+    /// use printpdf::BuiltinFont;
+    ///
+    /// // Use bundled font bytes but mark as Builtin so we can rely on builtin font rendering
+    /// let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+    /// let fd_builtin = FontData::new(data, Some(BuiltinFont::Helvetica)).expect("font data");
+    /// let family_builtin = FontFamily { regular: fd_builtin.clone(), bold: fd_builtin.clone(), italic: fd_builtin.clone(), bold_italic: fd_builtin.clone() };
+    /// let mut builtin_cache = FontCache::new(family_builtin);
+    ///
+    /// let mut r = Renderer::new(Size::new(210.0, 297.0), "text").expect("renderer");
+    /// builtin_cache.load_pdf_fonts(&mut r).expect("load builtin font");
+    /// let area = r.first_page().first_layer().area();
+    /// let style = genpdfi_extended::style::Style::new().with_font_family(builtin_cache.default_font_family()).with_font_size(12);
+    /// area.print_str(&builtin_cache, Position::new(Mm::from(10.0), Mm::from(280.0)), style, "Hello from builtin").expect("print");
+    /// let mut buf = Vec::new();
+    /// r.write(&mut buf).expect("write");
+    /// assert!(!buf.is_empty());
     /// ```
     pub fn new(size: impl Into<Size>, title: impl AsRef<str>) -> Result<Renderer, Error> {
         let size = size.into();
@@ -323,9 +492,28 @@ impl Renderer {
                 for op in layer.ops.clone().iter() {
                     match op {
                         printpdf::Op::WriteCodepointsWithKerning { font, cpk } => {
-                            // build string out of chars in cpk
-                            let s: String = cpk.iter().map(|(_, _, ch)| *ch).collect();
-                            let items = vec![printpdf::TextItem::Text(s)];
+                            // Build a compact ASCII marker that encodes glyph ids and offsets so
+                            // we can post-process the final PDF and replace the marker with a
+                            // proper TJ operator and a ToUnicode CMap.
+                            // Format: GENPDFI_CPK::<font_debug>::GIDS=gid,gid;OFFS=off,off;CHARS=...;
+                            let font_dbg = format!("{:?}", font);
+                            let gids: Vec<String> =
+                                cpk.iter().map(|(_, gid, _)| gid.to_string()).collect();
+                            let offs: Vec<String> =
+                                cpk.iter().map(|(off, _, _)| off.to_string()).collect();
+                            let chars_esc: String = cpk
+                                .iter()
+                                .map(|(_, _, ch)| ch.to_string())
+                                .collect::<Vec<_>>()
+                                .join("|");
+                            let marker = format!(
+                                "GENPDFI_CPK::{}::GIDS={}::OFFS={}::CHARS={};",
+                                font_dbg,
+                                gids.join(","),
+                                offs.join(","),
+                                chars_esc
+                            );
+                            let items = vec![printpdf::TextItem::Text(marker)];
                             new_ops.push(printpdf::Op::WriteText {
                                 items,
                                 font: font.clone(),
@@ -364,10 +552,49 @@ impl Renderer {
             self.doc.metadata.info.modification_date = date;
         }
 
-        // write to buffer
-        let mut buf = io::BufWriter::new(w);
-        self.doc.save_writer(&mut buf, &opts, &mut warnings);
-        Ok(())
+        // write to in-memory buffer so we can post-process TJ markers
+        let mut buf_vec: Vec<u8> = Vec::new();
+        self.doc.save_writer(&mut buf_vec, &opts, &mut warnings);
+
+        // Post-process the raw PDF bytes to replace our GENPDFI_CPK markers with proper
+        // TJ operators and attach a basic ToUnicode CMap for the used glyphs.
+        match postprocess_tj(&buf_vec) {
+            Ok(processed) => {
+                // write final bytes to the provided writer
+                let mut writer = io::BufWriter::new(w);
+                if let Err(e) = writer.write_all(&processed) {
+                    return Err(Error::new(
+                        format!("Failed to write processed PDF: {:?}", e),
+                        ErrorKind::PdfError("write failure".to_string()),
+                    ));
+                }
+                if let Err(e) = writer.flush() {
+                    return Err(Error::new(
+                        format!("Failed to flush writer: {:?}", e),
+                        ErrorKind::PdfError("flush failure".to_string()),
+                    ));
+                }
+                Ok(())
+            }
+            Err(e) => {
+                // If postprocessing fails, fall back to writing the original bytes so we
+                // don't break existing behavior.
+                let mut writer = io::BufWriter::new(w);
+                if let Err(e2) = writer.write_all(&buf_vec) {
+                    return Err(Error::new(
+                        format!("Failed to write fallback PDF: {:?}", e2),
+                        ErrorKind::PdfError("write failure".to_string()),
+                    ));
+                }
+                if let Err(e2) = writer.flush() {
+                    return Err(Error::new(
+                        format!("Failed to flush fallback writer: {:?}", e2),
+                        ErrorKind::PdfError("flush failure".to_string()),
+                    ));
+                }
+                Err(e)
+            }
+        }
     }
 }
 
@@ -1007,6 +1234,22 @@ impl<'p> Area<'p> {
         areas
     }
 
+    /// # Example (images)
+    /// ```rust
+    /// # #[cfg(feature = "images")] {
+    /// use genpdfi_extended::render::Renderer;
+    /// use genpdfi_extended::{Size, Mm, Position, Rotation, Scale};
+    /// use image::{DynamicImage, RgbImage, Rgb};
+    /// let mut r = Renderer::new(Size::new(210.0, 297.0), "img").expect("renderer");
+    /// let area = r.first_page().first_layer().area();
+    /// let img = DynamicImage::ImageRgb8(RgbImage::from_pixel(5, 5, Rgb([128,128,128])));
+    /// area.add_image(&img, Position::new(Mm::from(10.0), Mm::from(10.0)), Scale::new(1.0, 1.0), Rotation::from_degrees(0.0), None);
+    /// let mut buf = Vec::new();
+    /// r.write(&mut buf).expect("write");
+    /// assert!(!buf.is_empty());
+    /// # }
+    /// ```
+    ///
     /// Inserts an image into the document.
     ///
     /// *Only available if the `images` feature is enabled.*
@@ -1811,6 +2054,148 @@ mod tests {
             .iter()
             .any(|op| matches!(op, printpdf::Op::UseXobject { .. }));
         assert!(has_use_xobject);
+    }
+
+    fn postprocess_tj(buf: &[u8]) -> Result<Vec<u8>, Error> {
+        use lopdf::{Dictionary, Document, Object, Stream};
+
+        let mut doc = Document::load_mem(buf).map_err(|e| {
+            Error::new(
+                format!("Failed to parse PDF for postprocessing: {:?}", e),
+                ErrorKind::PdfError("parse failure".to_string()),
+            )
+        })?;
+
+        let pages = doc.get_pages();
+        for (_pnum, page_id) in pages {
+            let content_data = match doc.get_and_decode_page_content(page_id) {
+                Ok(d) => d,
+                Err(_) => lopdf::content::Content {
+                    operations: Vec::new(),
+                },
+            };
+            let content_bytes = content_data.encode().unwrap_or_default();
+            let content_str = String::from_utf8_lossy(&content_bytes).into_owned();
+            if !content_str.contains("GENPDFI_CPK::") {
+                continue;
+            }
+            let mut new_content = content_str.clone();
+            let mut offset = 0usize;
+            while let Some(pos) = new_content[offset..].find("GENPDFI_CPK::") {
+                let start = offset + pos;
+                if let Some(rel_end) = new_content[start..].find(';') {
+                    let end = start + rel_end + 1;
+                    let marker = &new_content[start..end];
+                    let parts: Vec<&str> = marker.split("::").collect();
+                    if parts.len() >= 4 {
+                        let gids_part = parts
+                            .iter()
+                            .find(|p| p.starts_with("GIDS="))
+                            .map(|p| &p[5..])
+                            .unwrap_or("");
+                        let offs_part = parts
+                            .iter()
+                            .find(|p| p.starts_with("OFFS="))
+                            .map(|p| &p[5..])
+                            .unwrap_or("");
+                        let chars_part = parts
+                            .iter()
+                            .find(|p| p.starts_with("CHARS="))
+                            .map(|p| &p[6..])
+                            .unwrap_or("");
+                        let gids: Vec<u16> = if gids_part.is_empty() {
+                            Vec::new()
+                        } else {
+                            gids_part
+                                .split(',')
+                                .filter_map(|s| s.parse::<u16>().ok())
+                                .collect()
+                        };
+                        let offs: Vec<i64> = if offs_part.is_empty() {
+                            Vec::new()
+                        } else {
+                            offs_part
+                                .split(',')
+                                .filter_map(|s| s.parse::<i64>().ok())
+                                .collect()
+                        };
+                        let chars: Vec<char> = if chars_part.is_empty() {
+                            Vec::new()
+                        } else {
+                            chars_part
+                                .split('|')
+                                .filter_map(|s| s.chars().next())
+                                .collect()
+                        };
+
+                        let mut tj_parts: Vec<String> = Vec::new();
+                        for (i, gid) in gids.iter().enumerate() {
+                            let b1 = ((gid >> 8) & 0xff) as u8;
+                            let b2 = (gid & 0xff) as u8;
+                            let hex = format!("<{:02X}{:02X}>", b1, b2);
+                            tj_parts.push(hex);
+                            if let Some(off) = offs.get(i) {
+                                tj_parts.push(format!("{}", off));
+                            }
+                        }
+                        let tj_str = format!("[{}] TJ", tj_parts.join(" "));
+                        new_content = new_content.replacen(marker, &tj_str, 1);
+
+                        if !gids.is_empty() {
+                            let mut cmap = String::new();
+                            cmap.push_str("/CIDInit /ProcSet findresource begin\n12 dict begin\n/Version 1.0 def\n/Length 0 def\n/begincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /GENPDFI def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
+                            cmap.push_str(&format!("{} beginbfchar\n", gids.len()));
+                            for (i, gid) in gids.iter().enumerate() {
+                                let b1 = ((gid >> 8) & 0xff) as u8;
+                                let b2 = (gid & 0xff) as u8;
+                                let src = format!("<{:02X}{:02X}>", b1, b2);
+                                let uni = chars.get(i).map(|c| *c as u32).unwrap_or(0u32);
+                                let dst = format!("<{:04X}>", uni);
+                                cmap.push_str(&format!("{} {}\n", src, dst));
+                            }
+                            cmap.push_str("endbfchar\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
+
+                            let cmap_stream = Stream::new(Dictionary::new(), cmap.into_bytes());
+                            let cmap_id = doc.new_object_id();
+                            doc.objects.insert(cmap_id, Object::Stream(cmap_stream));
+
+                            for (_id, obj) in doc.objects.iter_mut() {
+                                if let Object::Dictionary(ref mut dict) = obj {
+                                    match dict.get(b"Type") {
+                                        Ok(&Object::Name(ref name)) if name == b"Font" => {
+                                            dict.set(b"ToUnicode", Object::Reference(cmap_id));
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                            }
+                        }
+
+                        offset = start + tj_parts.join(" ").len();
+                        continue;
+                    }
+                }
+                break;
+            }
+
+            if new_content != content_str {
+                let new_stream = Stream::new(Dictionary::new(), new_content.into_bytes());
+                let new_id = doc.new_object_id();
+                doc.objects.insert(new_id, Object::Stream(new_stream));
+                if let Some(Object::Dictionary(ref mut pdict)) = doc.objects.get_mut(&page_id) {
+                    pdict.set(b"Contents", Object::Reference(new_id));
+                }
+            }
+        }
+
+        let mut out: Vec<u8> = Vec::new();
+        doc.save_to(&mut out).map_err(|e| {
+            Error::new(
+                format!("Failed to save postprocessed PDF: {:?}", e),
+                ErrorKind::PdfError("save failure".to_string()),
+            )
+        })?;
+        Ok(out)
     }
 
     #[test]

@@ -110,6 +110,7 @@ jobs:
           ROOT=target/doc
           DOCDIR="$ROOT/$REPO"
           echo "Doc dir: $DOCDIR"
+          mkdir -p "$DOCDIR"
           # Copy common global assets into crate doc dir if present (JS, CSS, WASM, fonts)
           shopt -s nullglob
           for f in "$ROOT"/crates.js "$ROOT"/main-*.js "$ROOT"/settings-*.js "$ROOT"/main-*.css "$ROOT"/normalize-*.css "$ROOT"/rustdoc-*.css "$ROOT"/storage-*.js "$ROOT"/*.wasm "$ROOT"/*.woff2; do
