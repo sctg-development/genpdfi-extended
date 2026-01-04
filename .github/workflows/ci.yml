@@ -57,7 +57,7 @@ jobs:
 
       - name: Generate coverage (Tarpaulin)
         continue-on-error: true
-        run: cargo tarpaulin --out Xml --output-dir coverage --all-features --skip wrap::tests::test_wrapper_overflow_sets_flag stdout
+        run: cargo tarpaulin --out Xml --output-dir coverage --all-features -- --skip wrap::tests::test_wrapper_overflow_sets_flag
 
       - name: Upload cobertura artifact
         uses: actions/upload-artifact@v4
