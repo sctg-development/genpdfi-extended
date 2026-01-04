@@ -326,7 +326,10 @@ impl Renderer {
                             // build string out of chars in cpk
                             let s: String = cpk.iter().map(|(_, _, ch)| *ch).collect();
                             let items = vec![printpdf::TextItem::Text(s)];
-                            new_ops.push(printpdf::Op::WriteText { items, font: font.clone() });
+                            new_ops.push(printpdf::Op::WriteText {
+                                items,
+                                font: font.clone(),
+                            });
                         }
                         other => new_ops.push(other.clone()),
                     }
@@ -1952,9 +1955,18 @@ mod tests {
         // Use a string with known kerning pairs
         let s = "AVo";
 
-        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
         let fd = FontData::new(data.clone(), None).expect("font data");
-        let family = FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let family = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
         let mut cache = FontCache::new(family);
 
         let mut r = Renderer::new(Size::new(210.0, 297.0), "tj-test").expect("renderer");
@@ -1969,12 +1981,17 @@ mod tests {
         let pdf_font = cache.get_pdf_font(font).expect("have pdf font");
 
         // Prepare kerning positions and glyph ids
-        let kerning_positions: Vec<i64> = font.kerning(&cache, s.chars()).into_iter().map(|p| (-p * 1000.0) as i64).collect();
+        let kerning_positions: Vec<i64> = font
+            .kerning(&cache, s.chars())
+            .into_iter()
+            .map(|p| (-p * 1000.0) as i64)
+            .collect();
         let codepoints: Vec<u16> = font.glyph_ids(&cache, s.chars());
 
         // Emit the in-memory WriteCodepointsWithKerning op explicitly
         if let IndirectFontRef::External(fid) = pdf_font.clone() {
-            area.layer.write_positioned_codepoints(fid, kerning_positions, codepoints, s.chars());
+            area.layer
+                .write_positioned_codepoints(fid, kerning_positions, codepoints, s.chars());
         } else {
             panic!("expected external pdf font");
         }
@@ -1983,7 +2000,8 @@ mod tests {
         let mut buf = Vec::new();
         r.write(&mut buf).expect("write");
         let mut warnings = Vec::new();
-        let parsed = printpdf::PdfDocument::parse(&buf, &PdfParseOptions::default(), &mut warnings).expect("parse");
+        let parsed = printpdf::PdfDocument::parse(&buf, &PdfParseOptions::default(), &mut warnings)
+            .expect("parse");
 
         // Accept either an explicit TJ/Tj operator or any parsed op debug that contains the
         // textual representation of the string `s` (ensures the serialized PDF contains
@@ -1992,7 +2010,12 @@ mod tests {
         let mut found = false;
         for op in parsed.pages[0].ops.iter() {
             let sdebug = format!("{:?}", op);
-            if sdebug.contains("TJ") || sdebug.contains("Tj") || sdebug.contains(s) || sdebug.contains("WriteText") || sdebug.contains("WriteTextBuiltinFont") {
+            if sdebug.contains("TJ")
+                || sdebug.contains("Tj")
+                || sdebug.contains(s)
+                || sdebug.contains("WriteText")
+                || sdebug.contains("WriteTextBuiltinFont")
+            {
                 found = true;
                 break;
             }
