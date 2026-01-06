@@ -640,7 +640,7 @@ dependencies = [
 
 [[package]]
 name = "genpdfi_extended"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "clap",
  "derive_more",

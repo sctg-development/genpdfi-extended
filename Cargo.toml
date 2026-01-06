@@ -1,6 +1,6 @@
 [package]
 name = "genpdfi_extended"
-version = "0.3.2"
+version = "0.3.3"
 authors = [
     "Robin Krahl <robin.krahl@ireas.org>",
     "Ismael Sh <me@theiskaa.com>",

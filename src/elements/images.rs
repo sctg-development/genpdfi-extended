@@ -1,5 +1,6 @@
 //! Image support for genpdfi-rs.
 
+use std::io::Read;
 use std::path;
 
 use image::GenericImageView;
@@ -8,38 +9,105 @@ use crate::error::{Context as _, Error, ErrorKind};
 use crate::{render, style};
 use crate::{Alignment, Context, Element, Mm, Position, RenderResult, Rotation, Scale, Size};
 
+/// Enum representing either a raster image or a vector SVG image.
+///
+/// This enum allows the `Image` struct to handle both raster formats (PNG, JPEG, etc.)
+/// and SVG vector graphics without rasterization, leveraging `printpdf`'s native SVG support.
+#[derive(Clone)]
+enum ImageSource {
+    /// A raster image loaded from formats supported by the `image` crate.
+    Raster(image::DynamicImage),
+    /// A vector SVG image parsed by printpdf as an ExternalXObject.
+    Svg(printpdf::ExternalXObject),
+}
+
+impl ImageSource {
+    /// Returns the intrinsic dimensions of the image in millimeters at the default DPI.
+    ///
+    /// For raster images, dimensions are calculated from pixel count and DPI.
+    /// For SVG images, dimensions are extracted from the ExternalXObject width and height.
+    ///
+    /// # Arguments
+    ///
+    /// * `dpi` - Optional DPI override for raster images. Defaults to 300 DPI if not specified.
+    ///
+    /// # Returns
+    ///
+    /// A `Size` struct containing the width and height in millimeters.
+    fn intrinsic_size(&self, dpi: Option<f32>) -> Size {
+        match self {
+            ImageSource::Raster(img) => {
+                let mmpi: f32 = 25.4; // millimeters per inch
+                let dpi_val: f32 = dpi.unwrap_or(300.0);
+                let (px_width, px_height) = img.dimensions();
+                Size::new(
+                    mmpi * ((px_width as f32) / dpi_val),
+                    mmpi * ((px_height as f32) / dpi_val),
+                )
+            }
+            ImageSource::Svg(svg) => {
+                // SVG dimensions in pixels from the ExternalXObject
+                // Convert to mm using 300 DPI (standard for SVG)
+                let mmpi: f32 = 25.4;
+                let svg_dpi: f32 = svg.dpi.unwrap_or(300.0);
+                let width_px = svg.width.map(|px| px.0 as f32).unwrap_or(100.0);
+                let height_px = svg.height.map(|px| px.0 as f32).unwrap_or(100.0);
+                Size::new(
+                    mmpi * (width_px / svg_dpi),
+                    mmpi * (height_px / svg_dpi),
+                )
+            }
+        }
+    }
+
+    /// Checks if this image source is an SVG.
+    ///
+    /// # Returns
+    ///
+    /// `true` if this is an SVG image, `false` otherwise.
+    fn is_svg(&self) -> bool {
+        matches!(self, ImageSource::Svg(_))
+    }
+}
+
 /// An image to embed in the PDF.
 ///
 /// *Only available if the `images` feature is enabled.*
 ///
-/// This struct is a wrapper around the configurations [`printpdf::Image`][] exposes.
+/// This struct supports both raster images and vector SVG graphics. Raster images are wrapped
+/// around the configurations [`printpdf::Image`][] exposes, while SVG images use `printpdf`'s
+/// native vector graphics support without rasterization.
 ///
-/// # Supported Formats
+/// # Supported Raster Formats
 ///
-/// All formats supported by the [`image`][] should be supported by this crate.  The BMP, JPEG and
-/// PNG formats are well tested and known to work.  
+/// All formats supported by the [`image`][] crate should be supported by this crate.
+/// The BMP, JPEG and PNG formats are well tested and known to work.
 ///
-/// Note that only the GIF, JPEG, PNG, PNM, TIFF and BMP formats are enabled by default.  If you
-/// want to use other formats, you have to add the `image` crate as a dependency and activate the
-/// required feature.
+/// Note that only the GIF, JPEG, PNG, PNM, TIFF and BMP formats are enabled by default.
+/// If you want to use other formats, you have to add the `image` crate as a dependency
+/// and activate the required feature.
 ///
-/// # Example
+/// # SVG Support
 ///
+/// SVG images are embedded as vector graphics without rasterization. They are processed
+/// through `printpdf`'s SVG parser and rendered as XObjects in the PDF.
+///
+/// # Examples
+///
+/// Load and display a raster image:
 /// ```
-/// use std::convert::TryFrom;
 /// use genpdfi_extended::elements;
 /// let image = elements::Image::from_path("examples/images/test_image.jpg")
 ///       .expect("Failed to load test image")
-///       .with_alignment(genpdfi_extended::Alignment::Center) // Center the image on the page.
-///       .with_scale(genpdfi_extended::Scale::new(0.5, 2.0)); // Squeeze and then stretch upwards.
+///       .with_alignment(genpdfi_extended::Alignment::Center)
+///       .with_scale(genpdfi_extended::Scale::new(0.5, 2.0));
 /// ```
 ///
 /// [`image`]: https://lib.rs/crates/image
 /// [`printpdf::Image`]: https://docs.rs/printpdf/latest/printpdf/types/plugins/graphics/two_dimensional/image/struct.Image.html
-/// [`printpdf` issue #98]: https://github.com/fschutt/printpdf/issues/98
 #[derive(Clone)]
 pub struct Image {
-    data: image::DynamicImage,
+    source: ImageSource,
 
     /// Used for positioning if no absolute position is given.
     alignment: Alignment,
@@ -74,12 +142,36 @@ pub struct Image {
 }
 
 impl Image {
-    /// Creates a new image from an already loaded image.
+    /// Creates a new image from an already loaded raster image.
+    ///
+    /// # Arguments
+    ///
+    /// * `data` - A DynamicImage from the `image` crate containing raster pixel data.
+    ///
+    /// # Returns
+    ///
+    /// A new `Image` struct configured with default alignment, no explicit position,
+    /// default scale, and no transformations.
+    ///
+    /// # Errors
+    ///
+    /// This function cannot fail and always returns `Ok(Image)`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "images")]
+    /// # {
+    /// use genpdfi_extended::elements::Image;
+    /// let img = image::DynamicImage::new_rgb8(100, 50);
+    /// let image = Image::from_dynamic_image(img).expect("create image");
+    /// # }
+    /// ```
     pub fn from_dynamic_image(data: image::DynamicImage) -> Result<Self, Error> {
         // Accept images with alpha; we'll composite them at render time using the
         // page/background color so that they visually match a flattened image.
         Ok(Image {
-            data,
+            source: ImageSource::Raster(data),
             alignment: Alignment::default(),
             position: None,
             scale: Scale::default(),
@@ -89,6 +181,147 @@ impl Image {
             background_color: None,
             dpi: None,
         })
+    }
+
+    /// Creates a new image from an SVG string.
+    ///
+    /// The SVG is parsed by `printpdf` to extract vector graphics without rasterization.
+    ///
+    /// # Arguments
+    ///
+    /// * `svg_content` - A string containing valid SVG markup.
+    ///
+    /// # Returns
+    ///
+    /// A new `Image` struct configured with default alignment, no explicit position,
+    /// default scale, and no transformations.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the SVG parsing fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::elements::Image;
+    /// let svg = r#"
+    ///   <svg width="100mm" height="50mm" viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">
+    ///     <circle cx="25" cy="25" r="20" fill="red"/>
+    ///   </svg>
+    /// "#;
+    /// let image = Image::from_svg_string(svg).expect("parse SVG");
+    /// ```
+    pub fn from_svg_string(svg_content: &str) -> Result<Self, Error> {
+        let mut warnings = Vec::new();
+        let svg_xobj = printpdf::Svg::parse(svg_content, &mut warnings)
+            .map_err(|e| Error::new(
+                format!("Failed to parse SVG: {}", e),
+                ErrorKind::InvalidData,
+            ))?;
+
+        Ok(Image {
+            source: ImageSource::Svg(svg_xobj),
+            alignment: Alignment::default(),
+            position: None,
+            scale: Scale::default(),
+            fit_to_page_width: None,
+            fit_to_page_height: None,
+            rotation: Rotation::default(),
+            background_color: None,
+            dpi: None,
+        })
+    }
+
+    /// Creates a new image by reading an SVG from a byte buffer.
+    ///
+    /// # Arguments
+    ///
+    /// * `svg_bytes` - A byte slice containing valid SVG markup in UTF-8 encoding.
+    ///
+    /// # Returns
+    ///
+    /// A new `Image` struct with default configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the bytes are not valid UTF-8 or if SVG parsing fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::elements::Image;
+    /// let svg_bytes = b"<svg width='100mm' height='50mm'><circle cx='25' cy='25' r='20' fill='blue'/></svg>";
+    /// let image = Image::from_svg_bytes(svg_bytes).expect("create from bytes");
+    /// ```
+    pub fn from_svg_bytes(svg_bytes: &[u8]) -> Result<Self, Error> {
+        let svg_content = std::str::from_utf8(svg_bytes)
+            .map_err(|e| Error::new(
+                format!("SVG bytes are not valid UTF-8: {}", e),
+                ErrorKind::InvalidData,
+            ))?;
+        Self::from_svg_string(svg_content)
+    }
+
+    /// Creates a new image by reading an SVG from a file path.
+    ///
+    /// # Arguments
+    ///
+    /// * `path` - A path to an SVG file.
+    ///
+    /// # Returns
+    ///
+    /// A new `Image` struct with default configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the file cannot be read, if its contents are not valid UTF-8,
+    /// or if SVG parsing fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::elements::Image;
+    /// // This example assumes an SVG file exists at the path
+    /// // In a real scenario, create such a file first
+    /// let result = Image::from_svg_path("examples/test.svg");
+    /// // The result would be Ok or Err depending on file existence
+    /// ```
+    pub fn from_svg_path<P: AsRef<path::Path>>(path: P) -> Result<Self, Error> {
+        let path_ref = path.as_ref();
+        let content = std::fs::read_to_string(path_ref)
+            .with_context(|| format!("Could not read SVG file from path {}", path_ref.display()))?;
+        Self::from_svg_string(&content)
+    }
+
+    /// Creates a new image from a reader yielding SVG content.
+    ///
+    /// # Arguments
+    ///
+    /// * `reader` - A reader that yields SVG markup as bytes.
+    ///
+    /// # Returns
+    ///
+    /// A new `Image` struct with default configuration.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if reading fails, if content is not valid UTF-8, or if SVG parsing fails.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use genpdfi_extended::elements::Image;
+    /// use std::io::Cursor;
+    /// let svg_data = b"<svg width='100mm' height='50mm'><rect width='100' height='50' fill='green'/></svg>";
+    /// let cursor = Cursor::new(svg_data.to_vec());
+    /// let image = Image::from_svg_reader(cursor).expect("create from reader");
+    /// ```
+    pub fn from_svg_reader<R: std::io::Read>(mut reader: R) -> Result<Self, Error> {
+        let mut content = String::new();
+        reader
+            .read_to_string(&mut content)
+            .context("Failed to read SVG from reader")?;
+        Self::from_svg_string(&content)
     }
 
     fn from_image_reader<R>(reader: image::io::Reader<R>) -> Result<Self, Error>
@@ -126,6 +359,19 @@ impl Image {
     /// Translates the image over to position.
     pub fn set_position(&mut self, position: impl Into<Position>) {
         self.position = Some(position.into());
+    }
+
+    /// Returns a reference to the raster image data if this is a raster image.
+    ///
+    /// # Returns
+    ///
+    /// `Some(&DynamicImage)` if this image is a raster image, `None` if it is an SVG.
+    #[cfg(test)]
+    fn raster_data(&self) -> Option<&image::DynamicImage> {
+        match &self.source {
+            ImageSource::Raster(img) => Some(img),
+            ImageSource::Svg(_) => None,
+        }
     }
 
     /// Translates the image over to position and returns it.
@@ -173,23 +419,15 @@ impl Image {
 
     /// Returns the intrinsic size (without scale) of the image in mm.
     fn intrinsic_size(&self) -> Size {
-        let mmpi: f32 = 25.4; // millimeters per inch
-        let dpi: f32 = self.dpi.unwrap_or(300.0);
-        let (px_width, px_height) = self.data.dimensions();
-        Size::new(
-            mmpi * ((px_width as f32) / dpi),
-            mmpi * ((px_height as f32) / dpi),
-        )
+        self.source.intrinsic_size(self.dpi)
     }
 
     /// Computes size in mm for a given explicit scale (without modifying `self.scale`).
     fn size_with_scale(&self, scale: Scale) -> Size {
-        let mmpi: f32 = 25.4; // millimeters per inch
-        let dpi: f32 = self.dpi.unwrap_or(300.0);
-        let (px_width, px_height) = self.data.dimensions();
+        let intrinsic = self.intrinsic_size();
         Size::new(
-            mmpi * ((scale.x * px_width as f32) / dpi),
-            mmpi * ((scale.y * px_height as f32) / dpi),
+            scale.x * intrinsic.width.0,
+            scale.y * intrinsic.height.0,
         )
     }
 
@@ -357,59 +595,68 @@ impl Element for Image {
         position += bb_origin;
 
         // Insert/render the image with the overridden/calculated position.
-        // If the image has an alpha channel, composite it on-the-fly over the background color
-        // (default white) so that rendering works with PDFs that don't support alpha.
-        if self.data.color().has_alpha() {
-            // Determine background color (default white)
-            let bg = self
-                .background_color
-                .unwrap_or(crate::style::Color::Rgb(255, 255, 255));
-
-            let bg_rgb = match bg {
-                crate::style::Color::Rgb(r, g, b) => (r, g, b),
-                crate::style::Color::Greyscale(v) => (v, v, v),
-                crate::style::Color::Cmyk(c, m, y, k) => {
-                    // Simple conversion by inverting CMYK to RGB (approximation)
-                    let cf = 1.0 - (c as f32 / 255.0);
-                    let mf = 1.0 - (m as f32 / 255.0);
-                    let yf = 1.0 - (y as f32 / 255.0);
-                    let kf = 1.0 - (k as f32 / 255.0);
-                    let r = ((1.0 - cf * kf) * 255.0).clamp(0.0, 255.0) as u8;
-                    let g = ((1.0 - mf * kf) * 255.0).clamp(0.0, 255.0) as u8;
-                    let b = ((1.0 - yf * kf) * 255.0).clamp(0.0, 255.0) as u8;
-                    (r, g, b)
-                }
-            };
-
-            let rgba = self.data.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            let mut rgb = image::RgbImage::new(w, h);
-
-            for (x, y, px) in rgba.enumerate_pixels() {
-                let image::Rgba([sr, sg, sb, sa]) = *px;
-                let af = sa as f32 / 255.0;
-                let r = (sr as f32 * af + bg_rgb.0 as f32 * (1.0 - af)).round() as u8;
-                let g = (sg as f32 * af + bg_rgb.1 as f32 * (1.0 - af)).round() as u8;
-                let b = (sb as f32 * af + bg_rgb.2 as f32 * (1.0 - af)).round() as u8;
-                rgb.put_pixel(x, y, image::Rgb([r, g, b]));
+        match &self.source {
+            ImageSource::Svg(svg) => {
+                // SVG rendering - no alpha compositing needed, printpdf handles it
+                area.add_svg(svg, position, effective_scale, self.rotation);
             }
+            ImageSource::Raster(raster) => {
+                // Raster rendering - handle alpha channel if present
+                // If the image has an alpha channel, composite it on-the-fly over the background color
+                // (default white) so that rendering works with PDFs that don't support alpha.
+                if raster.color().has_alpha() {
+                    // Determine background color (default white)
+                    let bg = self
+                        .background_color
+                        .unwrap_or(crate::style::Color::Rgb(255, 255, 255));
 
-            let composite = image::DynamicImage::ImageRgb8(rgb);
-            area.add_image(
-                &composite,
-                position,
-                effective_scale,
-                self.rotation,
-                self.dpi,
-            );
-        } else {
-            area.add_image(
-                &self.data,
-                position,
-                effective_scale,
-                self.rotation,
-                self.dpi,
-            );
+                    let bg_rgb = match bg {
+                        crate::style::Color::Rgb(r, g, b) => (r, g, b),
+                        crate::style::Color::Greyscale(v) => (v, v, v),
+                        crate::style::Color::Cmyk(c, m, y, k) => {
+                            // Simple conversion by inverting CMYK to RGB (approximation)
+                            let cf = 1.0 - (c as f32 / 255.0);
+                            let mf = 1.0 - (m as f32 / 255.0);
+                            let yf = 1.0 - (y as f32 / 255.0);
+                            let kf = 1.0 - (k as f32 / 255.0);
+                            let r = ((1.0 - cf * kf) * 255.0).clamp(0.0, 255.0) as u8;
+                            let g = ((1.0 - mf * kf) * 255.0).clamp(0.0, 255.0) as u8;
+                            let b = ((1.0 - yf * kf) * 255.0).clamp(0.0, 255.0) as u8;
+                            (r, g, b)
+                        }
+                    };
+
+                    let rgba = raster.to_rgba8();
+                    let (w, h) = rgba.dimensions();
+                    let mut rgb = image::RgbImage::new(w, h);
+
+                    for (x, y, px) in rgba.enumerate_pixels() {
+                        let image::Rgba([sr, sg, sb, sa]) = *px;
+                        let af = sa as f32 / 255.0;
+                        let r = (sr as f32 * af + bg_rgb.0 as f32 * (1.0 - af)).round() as u8;
+                        let g = (sg as f32 * af + bg_rgb.1 as f32 * (1.0 - af)).round() as u8;
+                        let b = (sb as f32 * af + bg_rgb.2 as f32 * (1.0 - af)).round() as u8;
+                        rgb.put_pixel(x, y, image::Rgb([r, g, b]));
+                    }
+
+                    let composite = image::DynamicImage::ImageRgb8(rgb);
+                    area.add_image(
+                        &composite,
+                        position,
+                        effective_scale,
+                        self.rotation,
+                        self.dpi,
+                    );
+                } else {
+                    area.add_image(
+                        raster,
+                        position,
+                        effective_scale,
+                        self.rotation,
+                        self.dpi,
+                    );
+                }
+            }
         }
 
         // Always false as we can't safely do this unless we want to try to do "sub-images".
@@ -822,7 +1069,7 @@ mod tests {
         ));
         let img = Image::from_dynamic_image(rgba).expect("should accept RGBA image");
         // data should still have alpha channel until render-time
-        assert!(img.data.color().has_alpha());
+        assert!(img.raster_data().map(|r| r.color().has_alpha()).unwrap_or(false));
     }
 
     #[cfg(feature = "images")]
@@ -922,5 +1169,99 @@ mod tests {
         let size = img.get_size();
         // expected width = 25.4 * (scale 1 * 100 px / 100 dpi) = 25.4 mm; height = 25.4*(50/100)=12.7
         assert_approx_eq!(Size, size, Size::new(25.4, 12.7));
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_from_svg_string_parses_valid_svg() {
+        let svg_content = r#"<svg width="100" height="50" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="50" cy="25" r="20" fill="red"/>
+        </svg>"#;
+        let img = Image::from_svg_string(svg_content);
+        assert!(img.is_ok(), "Should parse valid SVG");
+
+        let image = img.expect("valid svg");
+        // SVG should have intrinsic size
+        let size = image.intrinsic_size();
+        assert!(size.width.0 > 0.0, "SVG width should be positive");
+        assert!(size.height.0 > 0.0, "SVG height should be positive");
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_from_svg_string_rejects_invalid_svg() {
+        let invalid_svg = "this is not svg";
+        let result = Image::from_svg_string(invalid_svg);
+        assert!(result.is_err(), "Should reject invalid SVG");
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_from_svg_bytes_converts_utf8() {
+        let svg_bytes = b"<svg width='100' height='50' xmlns='http://www.w3.org/2000/svg'>
+            <rect width='100' height='50' fill='blue'/>
+        </svg>";
+        let img = Image::from_svg_bytes(svg_bytes);
+        assert!(img.is_ok(), "Should convert valid UTF-8 bytes to SVG");
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_from_svg_bytes_rejects_invalid_utf8() {
+        let invalid_utf8: &[u8] = &[0xFF, 0xFE];
+        let result = Image::from_svg_bytes(invalid_utf8);
+        assert!(result.is_err(), "Should reject invalid UTF-8");
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_from_svg_reader_reads_content() {
+        use std::io::Cursor;
+
+        let svg_data = b"<svg width='100' height='50' xmlns='http://www.w3.org/2000/svg'>
+            <polygon points='50,10 90,90 10,90' fill='green'/>
+        </svg>";
+        let cursor = Cursor::new(svg_data.to_vec());
+        let img = Image::from_svg_reader(cursor);
+        assert!(img.is_ok(), "Should read SVG from reader");
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_svg_image_with_transformations() {
+        use crate::{Alignment, Rotation, Scale};
+
+        let svg_content = r#"<svg width="200" height="100" xmlns="http://www.w3.org/2000/svg">
+            <line x1="0" y1="0" x2="200" y2="100" stroke="black"/>
+        </svg>"#;
+        let img = Image::from_svg_string(svg_content)
+            .expect("parse svg")
+            .with_alignment(Alignment::Center)
+            .with_scale(Scale::new(0.5, 0.5))
+            .with_clockwise_rotation(Rotation::from_degrees(45.0));
+
+        // Verify that all transformations were applied
+        assert_eq!(img.alignment, Alignment::Center);
+        assert_eq!(img.scale.x, 0.5);
+        assert_eq!(img.scale.y, 0.5);
+        assert!((img.rotation.degrees - 45.0).abs() < 0.001);
+    }
+
+    #[cfg(feature = "images")]
+    #[test]
+    fn test_svg_and_raster_image_sources_differentiated() {
+        let svg_content = r#"<svg width="100" height="50" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="25" cy="25" r="20" fill="red"/>
+        </svg>"#;
+        let svg_image = Image::from_svg_string(svg_content).expect("parse svg");
+
+        let raster_img = image::DynamicImage::new_rgb8(100, 50);
+        let raster_image = Image::from_dynamic_image(raster_img).expect("create raster");
+
+        // SVG image should not have raster data
+        assert!(svg_image.raster_data().is_none(), "SVG should not have raster data");
+
+        // Raster image should have raster data
+        assert!(raster_image.raster_data().is_some(), "Raster should have raster data");
     }
 }

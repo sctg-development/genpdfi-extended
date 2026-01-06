@@ -174,11 +174,21 @@ fn postprocess_tj(buf: &[u8]) -> Result<Vec<u8>, Error> {
 /// `printpdf` 0.8 which uses `FontId` for external fonts and `BuiltinFont` for builtin ones.
 #[derive(Clone, Debug, PartialEq)]
 pub enum IndirectFontRef {
+    /// Built-in font (`printpdf::BuiltinFont`), e.g. Times Roman.
+    /// Built-in fonts are handled as builtin and do not have a `FontId`.
     Builtin(printpdf::BuiltinFont),
+
+    /// External font added to the document (`printpdf::FontId`).
+    /// Represents a font loaded into the document and referencable by `FontId`.
     External(printpdf::FontId),
 }
 
 impl IndirectFontRef {
+    /// Converts the reference to a `printpdf::FontId` if possible.
+    ///
+    /// Returns `Ok(FontId)` if the reference is an external font (`External`),
+    /// or `Err(())` if it represents a built-in font (`Builtin`) which does not have a
+    /// `FontId`.
     pub fn into_op_font(&self) -> Result<printpdf::FontId, ()> {
         match self {
             IndirectFontRef::External(id) => Ok(id.clone()),
@@ -243,12 +253,12 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// Crée un nouveau rendu PDF avec une page initiale de la taille donnée et un titre.
+    /// Creates a new PDF renderer with an initial page of the given size and a title.
     ///
-    /// La méthode initialise un document `printpdf` et y ajoute une page et une couche
-    /// par défaut nommée "Layer 1". Elle renvoie une erreur si la création échoue.
+    /// The method initializes a `printpdf` document and adds a page and a default layer
+    /// named "Layer 1". It returns an error if creation fails.
     ///
-    /// # Exemple
+    /// # Example
     /// ```
     /// use genpdfi_extended::render::Renderer;
     /// use genpdfi_extended::Size;
@@ -316,33 +326,33 @@ impl Renderer {
         })
     }
 
-    /// Définit la conformance PDF (p. ex. PDF/A) pour le document généré.
+    /// Sets the PDF conformance (e.g. PDF/A) for the generated document.
     ///
-    /// L'option est appliquée au moment de l'enregistrement du document.
+    /// The option is applied when saving the document.
     pub fn with_conformance(mut self, conformance: printpdf::PdfConformance) -> Self {
         self.conformance = Some(conformance);
         self
     }
 
-    /// Définit la date de création qui sera inscrite dans les métadonnées du PDF.
+    /// Sets the creation date that will be recorded in the PDF metadata.
     ///
-    /// La valeur est conservée et appliquée lors de la sauvegarde du document.
+    /// The value is retained and applied when saving the document.
     pub fn with_creation_date(mut self, date: printpdf::OffsetDateTime) -> Self {
         self.creation_date = Some(date);
         self
     }
 
-    /// Définit la date de dernière modification pour les métadonnées du PDF.
+    /// Sets the last modification date for the PDF metadata.
     ///
-    /// À utiliser pour forcer la date de modification enregistrée dans le fichier.
+    /// Use this to force the modification date recorded in the file.
     pub fn with_modification_date(mut self, date: printpdf::OffsetDateTime) -> Self {
         self.modification_date = Some(date);
         self
     }
 
-    /// Ajoute une nouvelle page de la taille donnée au document.
+    /// Adds a new page of the given size to the document.
     ///
-    /// Une couche par défaut (`Layer 1`) est créée pour la nouvelle page.
+    /// A default layer (`Layer 1`) is created for the new page.
     pub fn add_page(&mut self, size: impl Into<Size>) {
         let size = size.into();
         let layer = printpdf::Layer::new("Layer 1");
@@ -361,39 +371,39 @@ impl Renderer {
         self.pages.push(Page::new(page_idx, layer_id, size))
     }
 
-    /// Renvoie le nombre de pages présentes dans le document en cours.
+    /// Returns the number of pages in the current document.
     pub fn page_count(&self) -> usize {
         self.pages.len()
     }
 
-    /// Retourne une référence immuable vers la page à l'index donné, ou `None` si hors
-    /// plage.
+    /// Returns an immutable reference to the page at the given index, or `None` if out
+    /// of range.
     pub fn get_page(&self, idx: usize) -> Option<&Page> {
         self.pages.get(idx)
     }
 
-    /// Retourne une référence mutable vers la page à l'index donné, ou `None` si hors
-    /// plage. Permet de modifier la page (ajout de couches, etc.).
+    /// Returns a mutable reference to the page at the given index, or `None` if out
+    /// of range. Allows modifying the page (adding layers, etc.).
     pub fn get_page_mut(&mut self, idx: usize) -> Option<&mut Page> {
         self.pages.get_mut(idx)
     }
 
-    /// Retourne une référence immuable vers la première page du document.
+    /// Returns an immutable reference to the first page of the document.
     pub fn first_page(&self) -> &Page {
         &self.pages[0]
     }
 
-    /// Retourne une référence mutable vers la première page du document.
+    /// Returns a mutable reference to the first page of the document.
     pub fn first_page_mut(&mut self) -> &mut Page {
         &mut self.pages[0]
     }
 
-    /// Retourne une référence immuable vers la dernière page du document.
+    /// Returns an immutable reference to the last page of the document.
     pub fn last_page(&self) -> &Page {
         &self.pages[self.pages.len() - 1]
     }
 
-    /// Retourne une référence mutable vers la dernière page du document.
+    /// Returns a mutable reference to the last page of the document.
     pub fn last_page_mut(&mut self) -> &mut Page {
         let idx = self.pages.len() - 1;
         &mut self.pages[idx]
@@ -637,7 +647,7 @@ impl Page {
         self.layers.push_with_obj(layer);
     }
 
-    /// Renvoie le nombre de couches présentes sur la page.
+    /// Returns the number of layers present on the page.
     ///
     /// # Examples
     ///
@@ -655,10 +665,10 @@ impl Page {
         self.layers.len()
     }
 
-    /// Retourne la couche à l'index fourni si elle existe, sinon `None`.
+    /// Returns the layer at the given index if it exists, otherwise `None`.
     ///
-    /// La valeur retournée est un wrapper `Layer` qui permet d'accéder aux fonctionnalités
-    /// de dessin de la couche.
+    /// The returned value is a `Layer` wrapper that provides access to the layer's drawing
+    /// functionality.
     ///
     /// # Examples
     ///
@@ -675,7 +685,7 @@ impl Page {
         self.layers.get(idx).map(|l| Layer::new(self, l))
     }
 
-    /// Retourne la première couche de la page.
+    /// Returns the first layer of the page.
     ///
     /// # Examples
     ///
@@ -687,7 +697,7 @@ impl Page {
     /// let page = r.get_page(0).expect("page");
     /// let first = page.first_layer();
     /// let last = page.last_layer();
-    /// // On obtient au moins une couche et les aires sont accessibles
+    /// // There is at least one layer and the areas are accessible
     /// let _a = first.area();
     /// let _b = last.area();
     /// ```
@@ -695,7 +705,7 @@ impl Page {
         Layer::new(self, self.layers.first())
     }
 
-    /// Retourne la dernière couche de la page.
+    /// Returns the last layer of the page.
     pub fn last_layer(&self) -> Layer<'_> {
         Layer::new(self, self.layers.last())
     }
@@ -714,7 +724,7 @@ impl Page {
 struct Layers(cell::RefCell<Vec<rc::Rc<cell::RefCell<LayerData>>>>);
 
 impl Layers {
-    /// Crée une nouvelle collection de couches en initialisant la première couche fournie.
+    /// Creates a new collection of layers, initializing it with the provided first layer.
     pub fn new(layer_id: printpdf::LayerInternalId) -> Self {
         Self(
             vec![rc::Rc::from(cell::RefCell::new(LayerData::from_id(
@@ -724,43 +734,43 @@ impl Layers {
         )
     }
 
-    /// Renvoie le nombre de couches connues.
+    /// Returns the number of known layers.
     pub fn len(&self) -> usize {
         self.0.borrow().len()
     }
 
-    /// Retourne la première couche (en `Rc`).
+    /// Returns the first layer (as `Rc`).
     pub fn first(&self) -> rc::Rc<cell::RefCell<LayerData>> {
         self.0.borrow().first().unwrap().clone()
     }
 
-    /// Retourne la dernière couche (en `Rc`).
+    /// Returns the last layer (as `Rc`).
     pub fn last(&self) -> rc::Rc<cell::RefCell<LayerData>> {
         self.0.borrow().last().unwrap().clone()
     }
 
-    /// Retourne la couche à l'index donné, si existante.
+    /// Returns the layer at the given index, if present.
     pub fn get(&self, idx: usize) -> Option<rc::Rc<cell::RefCell<LayerData>>> {
         self.0.borrow().get(idx).cloned()
     }
 
-    /// Ajoute une couche à la collection en fournissant un objet `printpdf::Layer` et
-    /// renvoie sa `Rc`.
+    /// Adds a layer to the collection by providing a `printpdf::Layer` object and
+    /// returns its `Rc`.
     pub fn push_with_obj(&self, layer_obj: printpdf::Layer) -> rc::Rc<cell::RefCell<LayerData>> {
         let layer_data = rc::Rc::from(cell::RefCell::new(LayerData::from_obj(layer_obj)));
         self.0.borrow_mut().push(layer_data.clone());
         layer_data
     }
 
-    /// Ajoute une couche à la collection en fournissant un `LayerInternalId` et
-    /// renvoie sa `Rc`.
+    /// Adds a layer to the collection by providing a `LayerInternalId` and
+    /// returns its `Rc`.
     pub fn push_id(&self, layer_id: printpdf::LayerInternalId) -> rc::Rc<cell::RefCell<LayerData>> {
         let layer_data = rc::Rc::from(cell::RefCell::new(LayerData::from_id(layer_id)));
         self.0.borrow_mut().push(layer_data.clone());
         layer_data
     }
 
-    /// Renvoie la couche suivant celle passée en argument, si elle existe.
+    /// Returns the layer following the one passed as argument, if it exists.
     pub fn next(
         &self,
         layer: &cell::RefCell<LayerData>,
@@ -901,6 +911,67 @@ impl<'p> Layer<'p> {
             scale_x: Some(scale.x),
             scale_y: Some(scale.y),
             dpi,
+        };
+
+        self.data.borrow_mut().ops.push(printpdf::Op::UseXobject {
+            id: xobj_id.clone(),
+            transform,
+        });
+    }
+
+    /// Adds an SVG to this layer by storing it as an XObject and emitting a UseXobject operation.
+    ///
+    /// This method embeds SVG vector graphics without rasterization, leveraging printpdf's
+    /// native SVG support. The SVG is stored as an XObject local to this layer and registered
+    /// into the document resources during serialization.
+    ///
+    /// # Arguments
+    ///
+    /// * `svg` - A parsed SVG ExternalXObject from printpdf
+    /// * `position` - The position on the layer in layer coordinates
+    /// * `scale` - Scaling factors for width and height
+    /// * `rotation` - Clockwise rotation in degrees
+    ///
+    /// # Notes
+    ///
+    /// The SVG dimensions are taken from the ExternalXObject width and height fields.
+    /// DPI does not apply to SVG as they are already vector-based.
+    #[cfg(feature = "images")]
+    fn add_svg(
+        &self,
+        svg: &printpdf::ExternalXObject,
+        position: LayerPosition,
+        scale: Scale,
+        rotation: Rotation,
+    ) {
+        // Create an XObject from the SVG and store it with a new id on the layer
+        let xobj = printpdf::XObject::External(svg.clone());
+        let xobj_id = printpdf::XObjectId::new();
+        self.data
+            .borrow_mut()
+            .xobjects
+            .push((xobj_id.clone(), xobj));
+
+        // Compute the transform: translate to user-space (lower-left origin), scale and rotate
+        let pdf_point: printpdf::Point = self.transform_position(position).into();
+
+        // For SVG, we use the ExternalXObject's inherent width and height
+        let svg_width_px = svg.width.map(|px| px.0).unwrap_or(100);
+        let svg_height_px = svg.height.map(|px| px.0).unwrap_or(100);
+
+        let rotate = printpdf::XObjectRotation {
+            angle_ccw_degrees: -rotation.degrees, // our Rotation is clockwise; XObjectRotation uses CCW
+            rotation_center_x: printpdf::Px(svg_width_px / 2),
+            rotation_center_y: printpdf::Px(svg_height_px / 2),
+        };
+
+        let transform = printpdf::XObjectTransform {
+            translate_x: Some(pdf_point.x),
+            translate_y: Some(pdf_point.y),
+            rotate: Some(rotate),
+            scale_x: Some(scale.x),
+            scale_y: Some(scale.y),
+            dpi: None, // DPI doesn't apply to vector graphics
         };
 
         self.data.borrow_mut().ops.push(printpdf::Op::UseXobject {
@@ -1267,6 +1338,38 @@ impl<'p> Area<'p> {
     ) {
         self.layer
             .add_image(image, self.position(position), scale, rotation, dpi);
+    }
+
+    /// Inserts an SVG image into the document.
+    ///
+    /// *Only available if the `images` feature is enabled.*
+    ///
+    /// SVG images are embedded as vector graphics without rasterization. This method
+    /// leverages `printpdf`'s native SVG support for optimal rendering quality.
+    ///
+    /// The position is assumed to be relative to the upper left hand corner of the area.
+    /// Your position will need to compensate for rotation/scale. Using [`Image`][]'s
+    /// render functionality will do this for you and is the recommended way to
+    /// insert an SVG into an Area.
+    ///
+    /// # Arguments
+    ///
+    /// * `svg` - A parsed SVG ExternalXObject from printpdf
+    /// * `position` - The position in the area, relative to upper left corner
+    /// * `scale` - Scaling factors for width and height
+    /// * `rotation` - Clockwise rotation in degrees
+    ///
+    /// [`Image`]: ../elements/struct.Image.html
+    #[cfg(feature = "images")]
+    pub fn add_svg(
+        &self,
+        svg: &printpdf::ExternalXObject,
+        position: Position,
+        scale: Scale,
+        rotation: Rotation,
+    ) {
+        self.layer
+            .add_svg(svg, self.position(position), scale, rotation);
     }
 
     /// Draws a line with the given points and the given line style.
