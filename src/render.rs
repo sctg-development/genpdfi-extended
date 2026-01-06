@@ -884,8 +884,6 @@ impl<'p> Layer<'p> {
             .borrow_mut()
             .xobjects
             .push((xobj_id.clone(), xobj));
-        // DEBUG: verify xobject pushed
-        println!("debug: pushed xobject id {:?}", xobj_id);
 
         // Compute the transform: translate to user-space (lower-left origin), scale and rotate
         let pdf_point: printpdf::Point = self.transform_position(position).into();
@@ -909,8 +907,6 @@ impl<'p> Layer<'p> {
             id: xobj_id.clone(),
             transform,
         });
-        // DEBUG: verify op pushed
-        println!("debug: pushed UseXobject op id {:?}", xobj_id);
     }
 
     fn add_line_shape<I>(&self, points: I)
@@ -2029,11 +2025,6 @@ mod tests {
         let mut buf = Vec::new();
         r.write(&mut buf).expect("write");
 
-        // DEBUG: inspect produced PDF bytes for /XObject and /Resources
-        let s = String::from_utf8_lossy(&buf);
-        println!("debug: pdf contains /XObject: {}", s.contains("/XObject"));
-        println!("debug: pdf head: {}", &s[..s.len().min(2000)]);
-
         // parse the produced PDF and inspect xobjects and ops
         let mut warnings = Vec::new();
         let parsed = printpdf::PdfDocument::parse(&buf, &PdfParseOptions::default(), &mut warnings)
@@ -2045,10 +2036,6 @@ mod tests {
         // ensure the page contains a UseXobject op (parser stores transforms as a preceding
         // SetTransformationMatrix op; don't rely on parsed transform fields being present)
         let page = &parsed.pages[0];
-        // Debug: print all ops
-        for op in page.ops.iter() {
-            println!("debug: page op: {:?}", op);
-        }
         let has_use_xobject = page
             .ops
             .iter()
