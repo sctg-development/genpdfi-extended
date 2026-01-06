@@ -4,7 +4,7 @@ use genpdfi_extended::subsetting::subset_font;
 use std::fs;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let font_path = "../tests/fonts/NotoSans.ttf";
+    let font_path = concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf");
     let font_data = fs::read(font_path)?;
 
     println!(

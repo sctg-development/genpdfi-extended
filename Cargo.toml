@@ -1,6 +1,6 @@
 [package]
 name = "genpdfi_extended"
-version = "0.3.1"
+version = "0.3.2"
 authors = [
     "Robin Krahl <robin.krahl@ireas.org>",
     "Ismael Sh <me@theiskaa.com>",
@@ -21,7 +21,7 @@ lopdf = "0.38.0"
 rusttype = "0.9.3"
 subsetter = "0.2.3"
 ttf-parser = "0.25.1"
-clap = { version = "4.5.53", features = ["derive"] }
+clap = { version = "4.5.54", features = ["derive"] }
 
 [dependencies.image]
 version = "0.25.9"

@@ -67,6 +67,11 @@ impl Mm {
     pub fn max(self, other: Mm) -> Mm {
         Mm(self.0.max(other.0))
     }
+
+    /// Returns the internal value in mm as f32.
+    pub fn as_f32(self) -> f32 {
+        self.0
+    }
 }
 
 impl From<i8> for Mm {
