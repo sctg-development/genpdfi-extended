@@ -1891,6 +1891,16 @@ mod tests {
     }
 
     #[test]
+    fn test_encode_win1252_box_drawing_fails() {
+        // Box-drawing characters are outside Windows-1252 and must not be encodable
+        let examples = vec!["├", "└", "│", "─"];
+        for ch in examples {
+            let res = encode_win1252(ch);
+            assert!(res.is_err(), "Expected encode_win1252 to fail for '{}'", ch);
+        }
+    }
+
+    #[test]
     fn test_encode_win1252_full_mapping_roundtrip() {
         // For each byte in 0..=255, build the corresponding Unicode character (if defined by
         // the Windows-1252 WIN_ANSI mapping) and assert that encoding that character produces

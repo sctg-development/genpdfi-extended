@@ -34,7 +34,7 @@ optional = true
 
 [dependencies.printpdf]
 version = "0.8.2"
-default-features = false
+features = ["html", "gif", "jpeg", "png", "webp"]
 
 [dependencies.derive_more]
 version = "2.1.1"
