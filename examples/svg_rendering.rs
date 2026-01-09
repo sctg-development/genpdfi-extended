@@ -9,12 +9,13 @@ fn main() {
         return;
     }
 
-#[cfg(feature = "images")]
-    println!("Running example: SVG rendering");
+    #[cfg(feature = "images")]
+    {
+        println!("Running example: SVG rendering");
 
-    // Prepare output directory
-    let out_dir = PathBuf::from("examples/output");
-    fs::create_dir_all(&out_dir).expect("create examples/output dir");
+        // Prepare output directory
+        let out_dir = PathBuf::from("examples/output");
+        fs::create_dir_all(&out_dir).expect("create examples/output dir");
 
     // Load font family
     let font_data = include_bytes!(concat!(
@@ -121,4 +122,5 @@ fn main() {
         .expect("create output file");
     doc.render(&mut pdf_file).expect("render document");
     println!("✓ Created examples/output/svg_rendering.pdf");
+    }
 }

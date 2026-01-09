@@ -23,7 +23,7 @@ use std::rc;
 use crate::error::{Context as _, Error, ErrorKind};
 use crate::fonts;
 use crate::style::{Color, LineStyle, Style};
-use crate::{Margins, Mm, Position, Size};
+use crate::{Margins, Mm, Position, Rotation, Size};
 use std::io::Write;
 
 // Postprocess helper to replace GENPDFI_CPK markers with TJ arrays using lopdf.
@@ -198,7 +198,7 @@ impl IndirectFontRef {
 }
 
 #[cfg(feature = "images")]
-use crate::{Rotation, Scale};
+use crate::Scale;
 #[cfg(feature = "images")]
 use image::GenericImageView;
 
@@ -1136,7 +1136,7 @@ impl<'p> Layer<'p> {
     }
 
     /// Adds a link annotation to the layer.
-    pub fn add_annotation(&mut self, annotation: printpdf::LinkAnnotation) {
+    pub fn add_annotation(&self, annotation: printpdf::LinkAnnotation) {
         self.data
             .borrow_mut()
             .ops
@@ -1370,6 +1370,63 @@ impl<'p> Area<'p> {
     ) {
         self.layer
             .add_svg(svg, self.position(position), scale, rotation);
+    }
+
+    /// Adds a clickable link annotation for an image area.
+    ///
+    /// # Arguments
+    ///
+    /// * `position` - Position of the image (upper-left corner)
+    /// * `size` - Size of the image in millimeters
+    /// * `rotation` - Rotation of the image
+    /// * `uri` - The URL to open when the image is clicked
+    pub fn add_image_link(
+        &self,
+        position: Position,
+        size: Size,
+        _rotation: Rotation,
+        uri: &str,
+    ) {
+        // Transform position from area-relative to PDF coordinates
+        let layer_position = self.position(position);
+        let pdf_position = self.layer.transform_position(layer_position);
+
+        // Create rectangle for the clickable area
+        let width_mm = size.width.0;
+        let height_mm = size.height.0;
+
+        // For simplicity, use unrotated bounds (axis-aligned bounding box).
+        // Convert the layer position (Mm) into a PDF point coordinate so the image
+        // transform (added as an XObject) and the annotation use the same unit system.
+        let pdf_point: printpdf::Point = pdf_position.into();
+
+        // Convert width/height from mm to points
+        let width_pt = printpdf::Pt::from(Mm(width_mm));
+        let height_pt = printpdf::Pt::from(Mm(height_mm));
+
+        // `pdf_point` is the upper-left corner in PDF user-space (points). Rectangle
+        // origin must be bottom-left so subtract height to get the bottom coordinate.
+        let left = pdf_point.x.0;
+        let bottom = pdf_point.y.0 - height_pt.0;
+
+        let rect = printpdf::Rect {
+            x: printpdf::Pt(left),
+            y: printpdf::Pt(bottom),
+            width: width_pt,
+            height: height_pt,
+        };
+
+        // Create the link annotation
+        let annotation = printpdf::LinkAnnotation::new(
+            rect,
+            printpdf::Actions::uri(uri.to_string()),
+            Some(printpdf::BorderArray::Solid([0.0, 0.0, 0.0])), // No visible border
+            Some(printpdf::ColorArray::Transparent),             // Transparent
+            None,
+        );
+
+        // Add annotation to layer
+        self.layer.add_annotation(annotation);
     }
 
     /// Draws a line with the given points and the given line style.

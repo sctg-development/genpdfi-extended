@@ -1,12 +1,17 @@
-#![cfg(feature = "images")]
-
 use std::fs;
 use std::path::PathBuf;
 
 use genpdfi_extended::{elements, fonts, Alignment, Document};
 
 fn main() {
-    println!("Running example: image_resizing_height");
+    if !cfg!(feature = "images") {
+        eprintln!("Skipping example: 'images' feature not enabled");
+        return;
+    }
+
+    #[cfg(feature = "images")]
+    {
+        println!("Running example: image_resizing_height");
 
     // Prepare output dir
     let out_dir = PathBuf::from("examples/output");
@@ -56,4 +61,5 @@ fn main() {
         fs::File::create(&out_dir.join("image_resizing_height.pdf")).expect("create output file");
     doc.render(&mut pdf_file).expect("render document");
     println!("✓ Created examples/output/image_resizing_height.pdf");
+    }
 }

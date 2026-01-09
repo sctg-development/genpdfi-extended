@@ -139,6 +139,9 @@ pub struct Image {
 
     /// DPI override if you know better. Defaults to `printpdf`’s default of 300 dpi.
     dpi: Option<f32>,
+
+    /// Optional hyperlink URI for the image. When set, clicking the image opens this URL.
+    link: Option<String>,
 }
 
 impl Image {
@@ -180,6 +183,7 @@ impl Image {
             rotation: Rotation::default(),
             background_color: None,
             dpi: None,
+            link: None,
         })
     }
 
@@ -212,8 +216,13 @@ impl Image {
     /// let image = Image::from_svg_string(svg).expect("parse SVG");
     /// ```
     pub fn from_svg_string(svg_content: &str) -> Result<Self, Error> {
+        // Workaround for printpdf bug: SVG <mask> elements cause "Invalid dictionary reference" errors.
+        // Strip <mask> elements and mask attribute references before parsing.
+        // See: SVG_MASK_BUG_ANALYSIS.md for details.
+        let cleaned_svg = Self::strip_svg_masks(svg_content);
+        
         let mut warnings = Vec::new();
-        let svg_xobj = printpdf::Svg::parse(svg_content, &mut warnings)
+        let svg_xobj = printpdf::Svg::parse(&cleaned_svg, &mut warnings)
             .map_err(|e| Error::new(
                 format!("Failed to parse SVG: {}", e),
                 ErrorKind::InvalidData,
@@ -229,7 +238,63 @@ impl Image {
             rotation: Rotation::default(),
             background_color: None,
             dpi: None,
+            link: None,
         })
+    }
+
+    /// Workaround for printpdf SVG <mask> parsing bug.
+    /// 
+    /// Removes <mask> element definitions and mask="url(#...)" attribute references
+    /// from SVG content to prevent "Invalid dictionary reference" errors during parsing.
+    /// 
+    /// This is a temporary workaround until printpdf properly supports SVG mask elements.
+    fn strip_svg_masks(svg_content: &str) -> String {
+        let mut result = svg_content.to_string();
+        
+        // Remove <mask ...>...</mask> blocks using simple string manipulation
+        // This is safer than complex state machines
+        while let Some(start) = result.find("<mask ") {
+            // Find the closing > of the opening tag
+            if let Some(open_end) = result[start..].find('>') {
+                let open_end = start + open_end + 1;
+                
+                // Find the closing </mask> tag
+                if let Some(close_pos) = result[open_end..].find("</mask>") {
+                    let close_pos = open_end + close_pos;
+                    let close_end = close_pos + 7; // len("</mask>")
+                    
+                    // Remove the entire mask element
+                    result.drain(start..close_end);
+                } else {
+                    // Malformed SVG, stop trying
+                    break;
+                }
+            } else {
+                // Malformed SVG, stop trying
+                break;
+            }
+        }
+        
+        // Remove mask="url(#...)" attributes
+        while let Some(start) = result.find("mask=\"url(#") {
+            // Find the closing )"
+            if let Some(end) = result[start..].find("\")") {
+                let end = start + end + 2; // Include the ")
+                // Also remove trailing space if present
+                let trim_space = if result.len() > end && result[end..].starts_with(' ') {
+                    1
+                } else {
+                    0
+                };
+                
+                result.drain(start..end + trim_space);
+            } else {
+                // Malformed mask attribute, stop trying
+                break;
+            }
+        }
+        
+        result
     }
 
     /// Creates a new image by reading an SVG from a byte buffer.
@@ -418,6 +483,20 @@ impl Image {
     }
 
     /// Returns the intrinsic size (without scale) of the image in mm.
+    ///
+    /// For raster images, dimensions are calculated from pixel count and DPI.
+    /// For SVG images, dimensions are extracted from the SVG's width/height attributes.
+    ///
+    /// This method is public to allow calculation of proportional scaling factors based
+    /// on the original SVG dimensions (useful for scale_factor-based resizing).
+    ///
+    /// # Returns
+    /// A `Size` struct containing width and height in millimeters.
+    pub fn get_intrinsic_size(&self) -> Size {
+        self.intrinsic_size()
+    }
+
+    /// Returns the intrinsic size (without scale) of the image in mm.
     fn intrinsic_size(&self) -> Size {
         self.source.intrinsic_size(self.dpi)
     }
@@ -478,6 +557,32 @@ impl Image {
     /// ```
     pub fn with_background_color(mut self, color: crate::style::Color) -> Self {
         self.set_background_color(color);
+        self
+    }
+
+    /// Sets a hyperlink URI for this image.
+    /// When set, clicking the image will open this URL in a PDF viewer.
+    pub fn set_link(&mut self, uri: impl Into<String>) {
+        self.link = Some(uri.into());
+    }
+
+    /// Sets a hyperlink URI for this image and returns it.
+    /// When set, clicking the image will open this URL in a PDF viewer.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "images")]
+    /// # {
+    /// use genpdfi_extended::elements::Image;
+    /// let img = Image::from_path("examples/images/test_image.jpg")
+    ///     .expect("load image")
+    ///     .with_link("https://example.com");
+    /// // Image is now clickable and will open the URL when clicked in a PDF viewer
+    /// # }
+    /// ```
+    pub fn with_link(mut self, uri: impl Into<String>) -> Self {
+        self.set_link(uri);
         self
     }
 
@@ -657,6 +762,11 @@ impl Element for Image {
                     );
                 }
             }
+        }
+
+        // Add link annotation after image is rendered (for both raster and SVG)
+        if let Some(url) = &self.link {
+            area.add_image_link(position, true_size, self.rotation, url);
         }
 
         // Always false as we can't safely do this unless we want to try to do "sub-images".

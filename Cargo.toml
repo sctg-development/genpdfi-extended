@@ -1,6 +1,6 @@
 [package]
 name = "genpdfi_extended"
-version = "0.3.3"
+version = "0.3.4"
 authors = [
     "Robin Krahl <robin.krahl@ireas.org>",
     "Ismael Sh <me@theiskaa.com>",
@@ -47,7 +47,7 @@ hyphenation = { version = "0.8", features = ["embed_en-us"] }
 tempfile = "3"
 
 [features]
-default = []
+default = ["images"]
 images = [
     "image",
     "printpdf/gif",

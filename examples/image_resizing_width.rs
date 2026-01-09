@@ -1,12 +1,17 @@
-#![cfg(feature = "images")]
-
 use std::fs;
 use std::path::PathBuf;
 
 use genpdfi_extended::{fonts, elements, Document, Alignment};
 
 fn main() {
-    println!("Running example: image_resizing_width");
+    if !cfg!(feature = "images") {
+        eprintln!("Skipping example: 'images' feature not enabled");
+        return;
+    }
+
+    #[cfg(feature = "images")]
+    {
+        println!("Running example: image_resizing_width");
 
     // Prepare output dir
     let out_dir = PathBuf::from("examples/output");
@@ -56,4 +61,5 @@ fn main() {
         .expect("create output file");
     doc.render(&mut pdf_file).expect("render document");
     println!("✓ Created examples/output/image_resizing_width.pdf");
+    }
 }
