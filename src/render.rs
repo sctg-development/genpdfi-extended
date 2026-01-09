@@ -27,7 +27,7 @@ use crate::{Margins, Mm, Position, Rotation, Size};
 use std::io::Write;
 
 // Postprocess helper to replace GENPDFI_CPK markers with TJ arrays using lopdf.
-fn postprocess_tj(buf: &[u8]) -> Result<Vec<u8>, Error> {
+fn postprocess_tj_impl(buf: &[u8]) -> Result<Vec<u8>, Error> {
     use lopdf::{Dictionary, Document, Object, Stream};
 
     let mut doc = Document::load_mem(buf).map_err(|e| {
@@ -170,6 +170,118 @@ fn postprocess_tj(buf: &[u8]) -> Result<Vec<u8>, Error> {
     Ok(out)
 }
 
+/// Post-process the PDF to:
+/// 1. Replace GENPDFI_CPK markers with proper TJ operators and ToUnicode CMap
+/// 2. Add link annotations to the appropriate pages
+fn postprocess_pdf(
+    buf: &[u8],
+    page_annotations: Vec<Vec<LinkAnnotation>>,
+) -> Result<Vec<u8>, Error> {
+    // First, do TJ post-processing
+    let processed = postprocess_tj_impl(buf)?;
+
+    // Then, add annotations to the PDF
+    add_annotations_to_pdf(&processed, page_annotations)
+}
+
+/// Add link annotations to pages in the PDF
+fn add_annotations_to_pdf(
+    buf: &[u8],
+    page_annotations: Vec<Vec<LinkAnnotation>>,
+) -> Result<Vec<u8>, Error> {
+    use lopdf::{Dictionary, Document, Object};
+
+    let mut doc = Document::load_mem(buf).map_err(|e| {
+        Error::new(
+            format!("Failed to parse PDF for adding annotations: {:?}", e),
+            ErrorKind::PdfError("parse failure".to_string()),
+        )
+    })?;
+
+    let pages = doc.get_pages();
+    let page_ids: Vec<_> = pages.iter().map(|(_, id)| *id).collect();
+
+    // First, create all annotation objects
+    let mut page_annot_refs: Vec<Vec<Object>> = Vec::new();
+
+    for (page_idx, _page_id) in page_ids.iter().enumerate() {
+        if page_idx >= page_annotations.len() || page_annotations[page_idx].is_empty() {
+            page_annot_refs.push(Vec::new());
+            continue;
+        }
+
+        let mut annot_refs = Vec::new();
+        for annotation in &page_annotations[page_idx] {
+            // Create a dictionary for each annotation
+            let mut annot_dict = Dictionary::new();
+            annot_dict.set(b"Type", Object::Name(b"Annot".to_vec()));
+            annot_dict.set(b"Subtype", Object::Name(b"Link".to_vec()));
+
+            // Set the rectangle [left, bottom, right, top]
+            let (x, y, w, h) = annotation.rect;
+            let rect = vec![
+                Object::Real(x),
+                Object::Real(y),
+                Object::Real(x + w),
+                Object::Real(y + h),
+            ];
+            annot_dict.set(b"Rect", Object::Array(rect));
+
+            // Set the action (URI)
+            let mut action_dict = Dictionary::new();
+            action_dict.set(b"S", Object::Name(b"URI".to_vec()));
+            action_dict.set(
+                b"URI",
+                Object::String(annotation.uri.as_bytes().to_vec(), Default::default()),
+            );
+            annot_dict.set(b"A", Object::Dictionary(action_dict));
+
+            // Set border style (invisible)
+            annot_dict.set(
+                b"Border",
+                Object::Array(vec![
+                    Object::Integer(0),
+                    Object::Integer(0),
+                    Object::Integer(0),
+                ]),
+            );
+
+            // Set color (transparent)
+            annot_dict.set(b"C", Object::Array(vec![]));
+
+            // Set highlight mode
+            annot_dict.set(b"H", Object::Name(b"I".to_vec()));
+
+            let annot_id = doc.new_object_id();
+            doc.objects.insert(annot_id, Object::Dictionary(annot_dict));
+            annot_refs.push(Object::Reference(annot_id));
+        }
+        page_annot_refs.push(annot_refs);
+    }
+
+    // Now add annotation references to pages
+    for (page_idx, &page_id) in page_ids.iter().enumerate() {
+        if page_annot_refs[page_idx].is_empty() {
+            continue;
+        }
+
+        if let Ok(page_obj) = doc.get_object_mut(page_id) {
+            if let Object::Dictionary(ref mut page_dict) = page_obj {
+                page_dict.set(b"Annots", Object::Array(page_annot_refs[page_idx].clone()));
+            }
+        }
+    }
+
+    let mut out: Vec<u8> = Vec::new();
+    doc.save_to(&mut out).map_err(|e| {
+        Error::new(
+            format!("Failed to save PDF with annotations: {:?}", e),
+            ErrorKind::PdfError("save failure".to_string()),
+        )
+    })?;
+    Ok(out)
+}
+
 /// Compatibility wrapper for a font reference (either builtin or external) to adapt to
 /// `printpdf` 0.8 which uses `FontId` for external fonts and `BuiltinFont` for builtin ones.
 #[derive(Clone, Debug, PartialEq)]
@@ -201,6 +313,15 @@ impl IndirectFontRef {
 use crate::Scale;
 #[cfg(feature = "images")]
 use image::GenericImageView;
+
+/// Represents a link annotation to be added to a PDF
+#[derive(Debug, Clone)]
+pub(crate) struct LinkAnnotation {
+    /// Rectangle bounds [x, y, width, height] in millimeters
+    pub rect: (f32, f32, f32, f32),
+    /// URI to open when clicked
+    pub uri: String,
+}
 
 /// A position relative to the top left corner of a layer.
 struct LayerPosition(Position);
@@ -466,14 +587,22 @@ impl Renderer {
     /// assert!(!buf.is_empty());
     /// ```
     pub fn write(mut self, w: impl io::Write) -> Result<(), Error> {
+        // Collect annotations from all layers before pages are assembled
+        let mut page_annotations: Vec<Vec<LinkAnnotation>> = vec![];
+
         // Assemble pages from our internal representation into the PDF document
         for page in &self.pages {
             let page_idx = page.page_idx;
             let mut new_ops: Vec<printpdf::Op> = Vec::new();
+            let mut page_annots = Vec::new();
+
             // borrow layers
             let layers_vec = page.layers.0.borrow();
             for layer_rc in layers_vec.iter() {
                 let mut layer = layer_rc.borrow_mut();
+                // Collect annotations from this layer
+                page_annots.extend(layer.annotations.clone());
+
                 // register layer object in document resources if present
                 if let Some(layer_obj) = layer.layer_obj.take() {
                     let id = self.doc.add_layer(&layer_obj);
@@ -547,6 +676,8 @@ impl Renderer {
                 );
                 self.doc.pages.push(pdf_page);
             }
+
+            page_annotations.push(page_annots);
         }
 
         let mut warnings = Vec::new();
@@ -562,13 +693,13 @@ impl Renderer {
             self.doc.metadata.info.modification_date = date;
         }
 
-        // write to in-memory buffer so we can post-process TJ markers
+        // write to in-memory buffer so we can post-process TJ markers and add annotations
         let mut buf_vec: Vec<u8> = Vec::new();
         self.doc.save_writer(&mut buf_vec, &opts, &mut warnings);
 
         // Post-process the raw PDF bytes to replace our GENPDFI_CPK markers with proper
-        // TJ operators and attach a basic ToUnicode CMap for the used glyphs.
-        match postprocess_tj(&buf_vec) {
+        // TJ operators, attach a basic ToUnicode CMap for the used glyphs, and add annotations.
+        match postprocess_pdf(&buf_vec, page_annotations) {
             Ok(processed) => {
                 // write final bytes to the provided writer
                 let mut writer = io::BufWriter::new(w);
@@ -1136,11 +1267,12 @@ impl<'p> Layer<'p> {
     }
 
     /// Adds a link annotation to the layer.
-    pub fn add_annotation(&self, annotation: printpdf::LinkAnnotation) {
+    /// Annotations are stored separately and added to the page during PDF post-processing.
+    pub fn add_annotation(&self, rect: (f32, f32, f32, f32), uri: String) {
         self.data
             .borrow_mut()
-            .ops
-            .push(printpdf::Op::LinkAnnotation { link: annotation });
+            .annotations
+            .push(LinkAnnotation { rect, uri });
     }
 }
 
@@ -1151,6 +1283,8 @@ struct LayerData {
     ops: Vec<printpdf::Op>,
     /// XObjects (images, forms) specific to this layer, stored until serialization
     xobjects: Vec<(printpdf::XObjectId, printpdf::XObject)>,
+    /// Link annotations that need to be added to the page
+    annotations: Vec<LinkAnnotation>,
     fill_color: cell::Cell<Color>,
     outline_color: cell::Cell<Color>,
     outline_thickness: cell::Cell<Mm>,
@@ -1163,6 +1297,7 @@ impl LayerData {
             layer_obj: None,
             ops: Vec::new(),
             xobjects: Vec::new(),
+            annotations: Vec::new(),
             fill_color: Color::Rgb(0, 0, 0).into(),
             outline_color: Color::Rgb(0, 0, 0).into(),
             outline_thickness: Mm::from(printpdf::Pt(1.0)).into(),
@@ -1175,6 +1310,7 @@ impl LayerData {
             layer_obj: Some(layer),
             ops: Vec::new(),
             xobjects: Vec::new(),
+            annotations: Vec::new(),
             fill_color: Color::Rgb(0, 0, 0).into(),
             outline_color: Color::Rgb(0, 0, 0).into(),
             outline_thickness: Mm::from(printpdf::Pt(1.0)).into(),
@@ -1380,13 +1516,7 @@ impl<'p> Area<'p> {
     /// * `size` - Size of the image in millimeters
     /// * `rotation` - Rotation of the image
     /// * `uri` - The URL to open when the image is clicked
-    pub fn add_image_link(
-        &self,
-        position: Position,
-        size: Size,
-        _rotation: Rotation,
-        uri: &str,
-    ) {
+    pub fn add_image_link(&self, position: Position, size: Size, _rotation: Rotation, uri: &str) {
         // Transform position from area-relative to PDF coordinates
         let layer_position = self.position(position);
         let pdf_position = self.layer.transform_position(layer_position);
@@ -1404,29 +1534,14 @@ impl<'p> Area<'p> {
         let width_pt = printpdf::Pt::from(Mm(width_mm));
         let height_pt = printpdf::Pt::from(Mm(height_mm));
 
-        // `pdf_point` is the upper-left corner in PDF user-space (points). Rectangle
-        // origin must be bottom-left so subtract height to get the bottom coordinate.
+        // `pdf_position.y` is already in PDF user-space (bottom-left origin), representing
+        // the bottom-left corner of the image area. No need to subtract height again.
         let left = pdf_point.x.0;
-        let bottom = pdf_point.y.0 - height_pt.0;
+        let bottom = pdf_point.y.0;
 
-        let rect = printpdf::Rect {
-            x: printpdf::Pt(left),
-            y: printpdf::Pt(bottom),
-            width: width_pt,
-            height: height_pt,
-        };
-
-        // Create the link annotation
-        let annotation = printpdf::LinkAnnotation::new(
-            rect,
-            printpdf::Actions::uri(uri.to_string()),
-            Some(printpdf::BorderArray::Solid([0.0, 0.0, 0.0])), // No visible border
-            Some(printpdf::ColorArray::Transparent),             // Transparent
-            None,
-        );
-
-        // Add annotation to layer
-        self.layer.add_annotation(annotation);
+        // Create annotation using our custom structure with the URI stored directly
+        self.layer
+            .add_annotation((left, bottom, width_pt.0, height_pt.0), uri.to_string());
     }
 
     /// Draws a line with the given points and the given line style.
@@ -1727,23 +1842,12 @@ impl<'f, 'p> TextSection<'f, 'p> {
         let left = pdf_pos.x.0;
         let bottom = pdf_pos.y.0 - font.ascent(style.font_size()).0;
         let width = text_width.0;
-        let top = pdf_pos.y.0 + font.descent(style.font_size()).0;
-        let height = top - bottom;
-        let rect = printpdf::Rect {
-            x: printpdf::Pt(left),
-            y: printpdf::Pt(bottom),
-            width: printpdf::Pt(width),
-            height: printpdf::Pt(height),
-        };
+        let height = font.ascent(style.font_size()).0 - font.descent(style.font_size()).0;
 
-        let annotation = printpdf::LinkAnnotation::new(
-            rect,
-            printpdf::Actions::uri(uri.to_string()),
-            Some(printpdf::BorderArray::Solid([0.0, 0.0, 0.0])), // No border
-            Some(printpdf::ColorArray::Transparent),             // Transparent color
-            None,
-        );
-        self.area.layer.add_annotation(annotation);
+        // Add annotation using our custom structure
+        self.area
+            .layer
+            .add_annotation((left, bottom, width, height), uri.to_string());
 
         // Handle first character positioning
         if self.is_first {
