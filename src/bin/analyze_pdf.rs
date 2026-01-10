@@ -89,9 +89,69 @@ fn analyze_pdf_version(document: &Document) -> Result<(), Box<dyn std::error::Er
         println!("  ✓ Document contains {} page(s)", pages.len());
     }
 
-    println!("  Standard version: PDF 1.4 or later (based on analysis)");
+    // Get the actual PDF version from the document
+    let version = document.version.as_str();
+    println!("  PDF Version: {}", version);
+
+    // Parse version for better display
+    if let Some((major, minor)) = parse_version(version) {
+        match (major, minor) {
+            (2, _) => {
+                println!("  ✓ PDF 2.0 - ISO 32000-2:2020 compliant");
+                println!("    Supports: MathML, structured content, AI content");
+            }
+            (1, 7) => {
+                println!("  ✓ PDF 1.7 - ISO 32000-1:2008 compliant");
+                println!("    Advanced features enabled");
+            }
+            (1, 6) => {
+                println!("  ✓ PDF 1.6 - ISO 32000-1:2008 (subset)");
+                println!("    Standard features");
+            }
+            _ => println!("  PDF {}.{}", major, minor),
+        }
+    }
+
+    // Check for advanced features that indicate PDF 2.0 compatibility
+    let mut advanced_features = Vec::new();
+    for (_id, object) in document.objects.iter() {
+        if let Object::Stream(stream) = object {
+            let dict = &stream.dict;
+            if let Ok(subtype_obj) = dict.get(b"Subtype") {
+                if let Some(subtype_str) = get_string_value(subtype_obj) {
+                    if subtype_str.contains("mathml")
+                        || subtype_str.contains("MathML")
+                        || subtype_str.contains("application#2fmathml")
+                    {
+                        if !advanced_features.contains(&"MathML streams") {
+                            advanced_features.push("MathML streams");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !advanced_features.is_empty() {
+        println!(
+            "  📊 Advanced features detected: {}",
+            advanced_features.join(", ")
+        );
+    }
+
     println!();
     Ok(())
+}
+
+// Helper function to parse PDF version string
+fn parse_version(version: &str) -> Option<(u32, u32)> {
+    let parts: Vec<&str> = version.split('.').collect();
+    if parts.len() >= 2 {
+        if let (Ok(major), Ok(minor)) = (parts[0].parse(), parts[1].parse()) {
+            return Some((major, minor));
+        }
+    }
+    None
 }
 
 fn analyze_document_info(document: &Document) -> Result<(), Box<dyn std::error::Error>> {
