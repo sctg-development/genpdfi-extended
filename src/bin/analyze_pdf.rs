@@ -391,11 +391,14 @@ fn analyze_pages(document: &Document) -> Result<(), Box<dyn std::error::Error>> 
                                     // Analyze content stream for rendering operations
                                     if let Ok(content_str) = std::str::from_utf8(&stream.content) {
                                         // Check for text showing operations
-                                        let has_text_show = content_str.contains("Tj") || content_str.contains("TJ");
+                                        let has_text_show = content_str.contains("Tj")
+                                            || content_str.contains("TJ");
                                         if has_text_show {
-                                            println!("      ✓ Contains text showing operations (Tj/TJ)");
+                                            println!(
+                                                "      ✓ Contains text showing operations (Tj/TJ)"
+                                            );
                                         }
-                                        
+
                                         // Check for graphics state operations
                                         let has_gs = content_str.contains("/GS");
                                         if has_gs {
@@ -405,7 +408,9 @@ fn analyze_pages(document: &Document) -> Result<(), Box<dyn std::error::Error>> 
                                         // Look for XObject references (Do operator)
                                         let has_do = content_str.contains(" Do");
                                         if has_do {
-                                            println!("      ✓ References XObjects (formulas, images)");
+                                            println!(
+                                                "      ✓ References XObjects (formulas, images)"
+                                            );
                                         }
 
                                         // Look for MathML elements in the content
@@ -431,7 +436,7 @@ fn analyze_pages(document: &Document) -> Result<(), Box<dyn std::error::Error>> 
                     if let Object::Dictionary(resources_dict) = resources_obj {
                         if !resources_dict.is_empty() {
                             println!("    Resources:");
-                            
+
                             // Analyze XObjects
                             if let Ok(xobjects_obj) = resources_dict.get(b"XObject") {
                                 if let Object::Dictionary(xobjects_dict) = xobjects_obj {
@@ -440,9 +445,14 @@ fn analyze_pages(document: &Document) -> Result<(), Box<dyn std::error::Error>> 
                                         if let Object::Reference(xobj_id) = xobj_ref {
                                             if let Ok(xobj) = document.get_object(*xobj_id) {
                                                 if let Object::Stream(xobj_stream) = xobj {
-                                                    if let Ok(subtype) = xobj_stream.dict.get(b"Subtype") {
-                                                        if let Some(subtype_str) = get_string_value(subtype) {
-                                                            println!("        - {:?}: {} ({} bytes)",
+                                                    if let Ok(subtype) =
+                                                        xobj_stream.dict.get(b"Subtype")
+                                                    {
+                                                        if let Some(subtype_str) =
+                                                            get_string_value(subtype)
+                                                        {
+                                                            println!(
+                                                                "        - {:?}: {} ({} bytes)",
                                                                 String::from_utf8_lossy(xobj_key),
                                                                 subtype_str,
                                                                 xobj_stream.content.len()
@@ -455,7 +465,7 @@ fn analyze_pages(document: &Document) -> Result<(), Box<dyn std::error::Error>> 
                                     }
                                 }
                             }
-                            
+
                             // Check for other resources
                             for (key, _) in resources_dict.iter() {
                                 match key.as_slice() {
