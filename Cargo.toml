@@ -22,6 +22,7 @@ rusttype = "0.9.3"
 subsetter = "0.2.3"
 ttf-parser = "0.25.1"
 clap = { version = "4.5.54", features = ["derive"] }
+flate2 = "1.0"
 
 [dependencies.image]
 version = "0.25.9"
@@ -45,6 +46,8 @@ features = ["add", "add_assign", "from", "into", "mul", "mul_assign", "sum"]
 float-cmp = { version = "0.10.0", default-features = false, features = ["std"] }
 hyphenation = { version = "0.8", features = ["embed_en-us"] }
 tempfile = "3"
+assert_cmd = "2"
+predicates = "2"
 
 [features]
 default = ["images"]
