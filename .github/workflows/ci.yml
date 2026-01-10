@@ -69,8 +69,6 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           slug: sctg-development/genpdfi-extended
-          files: coverage/cobertura.xml
-
   docs:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
