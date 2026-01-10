@@ -388,8 +388,27 @@ fn analyze_pages(document: &Document) -> Result<(), Box<dyn std::error::Error>> 
                                         content_id, content_len
                                     );
 
-                                    // Look for MathML elements in the content
+                                    // Analyze content stream for rendering operations
                                     if let Ok(content_str) = std::str::from_utf8(&stream.content) {
+                                        // Check for text showing operations
+                                        let has_text_show = content_str.contains("Tj") || content_str.contains("TJ");
+                                        if has_text_show {
+                                            println!("      ✓ Contains text showing operations (Tj/TJ)");
+                                        }
+                                        
+                                        // Check for graphics state operations
+                                        let has_gs = content_str.contains("/GS");
+                                        if has_gs {
+                                            println!("      ✓ Uses graphics state operations");
+                                        }
+
+                                        // Look for XObject references (Do operator)
+                                        let has_do = content_str.contains(" Do");
+                                        if has_do {
+                                            println!("      ✓ References XObjects (formulas, images)");
+                                        }
+
+                                        // Look for MathML elements in the content
                                         if content_str.contains("Math")
                                             || content_str.contains("<math")
                                         {
@@ -407,19 +426,42 @@ fn analyze_pages(document: &Document) -> Result<(), Box<dyn std::error::Error>> 
                     }
                 }
 
-                // Page resources
+                // Page resources - detailed analysis
                 if let Ok(resources_obj) = page_dict.get(b"Resources") {
                     if let Object::Dictionary(resources_dict) = resources_obj {
                         if !resources_dict.is_empty() {
                             println!("    Resources:");
-                            for (key, _) in resources_dict {
-                                match key.as_slice() {
-                                    b"Font" => println!("      - Fonts"),
-                                    b"XObject" => {
-                                        println!("      - XObjects (images, forms)")
+                            
+                            // Analyze XObjects
+                            if let Ok(xobjects_obj) = resources_dict.get(b"XObject") {
+                                if let Object::Dictionary(xobjects_dict) = xobjects_obj {
+                                    println!("      - XObjects ({} total):", xobjects_dict.len());
+                                    for (xobj_key, xobj_ref) in xobjects_dict.iter().take(10) {
+                                        if let Object::Reference(xobj_id) = xobj_ref {
+                                            if let Ok(xobj) = document.get_object(*xobj_id) {
+                                                if let Object::Stream(xobj_stream) = xobj {
+                                                    if let Ok(subtype) = xobj_stream.dict.get(b"Subtype") {
+                                                        if let Some(subtype_str) = get_string_value(subtype) {
+                                                            println!("        - {:?}: {} ({} bytes)",
+                                                                String::from_utf8_lossy(xobj_key),
+                                                                subtype_str,
+                                                                xobj_stream.content.len()
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
-                                    b"Pattern" => println!("      - Patterns"),
-                                    b"ColorSpace" => println!("      - ColorSpaces"),
+                                }
+                            }
+                            
+                            // Check for other resources
+                            for (key, _) in resources_dict.iter() {
+                                match key.as_slice() {
+                                    b"Font" => println!("      - Fonts present"),
+                                    b"Pattern" => println!("      - Patterns present"),
+                                    b"ColorSpace" => println!("      - ColorSpaces present"),
                                     _ => {}
                                 }
                             }
