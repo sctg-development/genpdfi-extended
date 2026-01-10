@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -29,7 +29,7 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/cargo_home
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
@@ -54,22 +54,22 @@ jobs:
 
       - name: Generate coverage (Tarpaulin)
         continue-on-error: true
+        shell: bash
         run: cargo tarpaulin --out Xml --output-dir coverage --all-features --no-fail-fast -- --skip wrap::tests::test_wrapper_overflow_sets_flag
 
       - name: Upload cobertura artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         continue-on-error: true
         with:
           name: cobertura
           path: coverage/cobertura.xml
 
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          slug: sctg-development/genpdfi-extended
           files: coverage/cobertura.xml
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-          CODECOV_SLUG: sctg-development/genpdfi-extended
 
   docs:
     runs-on: ubuntu-latest
@@ -89,7 +89,7 @@ jobs:
         env:
           CARGO_HOME: ${{ runner.temp }}/cargo_home
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/registry
