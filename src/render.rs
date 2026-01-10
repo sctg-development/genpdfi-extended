@@ -28,6 +28,7 @@ use std::io::Write;
 
 // Postprocess helper to replace GENPDFI_CPK markers with TJ arrays using lopdf.
 fn postprocess_tj_impl(buf: &[u8]) -> Result<Vec<u8>, Error> {
+    use lopdf::content::{Content, Operation};
     use lopdf::{Dictionary, Document, Object, Stream};
 
     let mut doc = Document::load_mem(buf).map_err(|e| {
@@ -39,98 +40,39 @@ fn postprocess_tj_impl(buf: &[u8]) -> Result<Vec<u8>, Error> {
 
     let pages = doc.get_pages();
     for (_pnum, page_id) in pages {
-        let content_data = match doc.get_and_decode_page_content(page_id) {
+        let mut content_data = match doc.get_and_decode_page_content(page_id) {
             Ok(d) => d,
-            Err(_) => lopdf::content::Content {
+            Err(_) => Content {
                 operations: Vec::new(),
             },
         };
-        // encode content to bytes and turn to string for pattern matching
-        let content_bytes = content_data.encode().unwrap_or_default();
-        let content_str = String::from_utf8_lossy(&content_bytes).into_owned();
-        if !content_str.contains("GENPDFI_CPK::") {
-            continue;
-        }
-        let mut new_content = content_str.clone();
-        let mut offset = 0usize;
-        while let Some(pos) = new_content[offset..].find("GENPDFI_CPK::") {
-            let start = offset + pos;
-            if let Some(rel_end) = new_content[start..].find(';') {
-                let end = start + rel_end + 1;
-                let marker = &new_content[start..end];
-                let parts: Vec<&str> = marker.split("::").collect();
-                if parts.len() >= 4 {
-                    let gids_part = parts
-                        .iter()
-                        .find(|p| p.starts_with("GIDS="))
-                        .map(|p| &p[5..])
-                        .unwrap_or("");
-                    let offs_part = parts
-                        .iter()
-                        .find(|p| p.starts_with("OFFS="))
-                        .map(|p| &p[5..])
-                        .unwrap_or("");
-                    let chars_part = parts
-                        .iter()
-                        .find(|p| p.starts_with("CHARS="))
-                        .map(|p| &p[6..])
-                        .unwrap_or("");
-                    let gids: Vec<u16> = if gids_part.is_empty() {
-                        Vec::new()
-                    } else {
-                        gids_part
-                            .split(',')
-                            .filter_map(|s| s.parse::<u16>().ok())
-                            .collect()
-                    };
-                    let offs: Vec<i64> = if offs_part.is_empty() {
-                        Vec::new()
-                    } else {
-                        offs_part
-                            .split(',')
-                            .filter_map(|s| s.parse::<i64>().ok())
-                            .collect()
-                    };
-                    let chars: Vec<char> = if chars_part.is_empty() {
-                        Vec::new()
-                    } else {
-                        chars_part
-                            .split('|')
-                            .filter_map(|s| s.chars().next())
-                            .collect()
-                    };
 
-                    let mut tj_parts: Vec<String> = Vec::new();
-                    for (i, gid) in gids.iter().enumerate() {
-                        let b1 = ((gid >> 8) & 0xff) as u8;
-                        let b2 = (gid & 0xff) as u8;
-                        let hex = format!("<{:02X}{:02X}>", b1, b2);
-                        tj_parts.push(hex);
-                        if let Some(off) = offs.get(i) {
-                            tj_parts.push(format!("{}", off));
-                        }
-                    }
-                    let tj_str = format!("[{}] TJ", tj_parts.join(" "));
-                    new_content = new_content.replacen(marker, &tj_str, 1);
+        let mut modified = false;
 
-                    if !gids.is_empty() {
-                        let mut cmap = String::new();
-                        cmap.push_str("/CIDInit /ProcSet findresource begin\n12 dict begin\n/Version 1.0 def\n/Length 0 def\n/begincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /GENPDFI def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
-                        cmap.push_str(&format!("{} beginbfchar\n", gids.len()));
-                        for (i, gid) in gids.iter().enumerate() {
-                            let b1 = ((gid >> 8) & 0xff) as u8;
-                            let b2 = (gid & 0xff) as u8;
-                            let src = format!("<{:02X}{:02X}>", b1, b2);
-                            let uni = chars.get(i).map(|c| *c as u32).unwrap_or(0u32);
-                            let dst = format!("<{:04X}>", uni);
-                            cmap.push_str(&format!("{} {}\n", src, dst));
-                        }
-                        cmap.push_str("endbfchar\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
+        // Process each operation
+        for op in &mut content_data.operations {
+            if op.operator != "Tj" && op.operator != "TJ" {
+                continue;
+            }
 
+            // Check if this operation contains our GENPDFI_CPK marker
+            if let Some(Object::String(bytes, _) | Object::String(bytes, _)) = op.operands.first() {
+                let text = String::from_utf8_lossy(bytes);
+                if !text.contains("GENPDFI_CPK::") {
+                    continue;
+                }
+
+                // Parse the marker and build TJ operation
+                if let Some(result) = parse_and_build_tj(&text) {
+                    *op = result.operation;
+
+                    // Store ToUnicode CMap for later application
+                    if let Some(cmap) = result.cmap {
                         let cmap_stream = Stream::new(Dictionary::new(), cmap.into_bytes());
                         let cmap_id = doc.new_object_id();
                         doc.objects.insert(cmap_id, Object::Stream(cmap_stream));
 
+                        // Apply ToUnicode to all fonts in the page
                         for (_id, obj) in doc.objects.iter_mut() {
                             if let Object::Dictionary(ref mut dict) = obj {
                                 match dict.get(b"Type") {
@@ -143,15 +85,14 @@ fn postprocess_tj_impl(buf: &[u8]) -> Result<Vec<u8>, Error> {
                         }
                     }
 
-                    offset = start + tj_parts.join(" ").len();
-                    continue;
+                    modified = true;
                 }
             }
-            break;
         }
 
-        if new_content != content_str {
-            let new_stream = Stream::new(Dictionary::new(), new_content.into_bytes());
+        if modified {
+            let new_content_bytes = content_data.encode().unwrap_or_default();
+            let new_stream = Stream::new(Dictionary::new(), new_content_bytes);
             let new_id = doc.new_object_id();
             doc.objects.insert(new_id, Object::Stream(new_stream));
             if let Some(Object::Dictionary(ref mut pdict)) = doc.objects.get_mut(&page_id) {
@@ -170,18 +111,112 @@ fn postprocess_tj_impl(buf: &[u8]) -> Result<Vec<u8>, Error> {
     Ok(out)
 }
 
-/// Post-process the PDF to:
-/// 1. Replace GENPDFI_CPK markers with proper TJ operators and ToUnicode CMap
-/// 2. Add link annotations to the appropriate pages
+/// Result of parsing and building a TJ operation from a GENPDFI_CPK marker
+struct TJResult {
+    operation: lopdf::content::Operation,
+    cmap: Option<String>,
+}
+
+/// Parse a GENPDFI_CPK marker and build a proper TJ operation
+fn parse_and_build_tj(text: &str) -> Option<TJResult> {
+    use lopdf::content::Operation;
+    use lopdf::Object;
+
+    let marker_start = text.find("GENPDFI_CPK::")?;
+    let marker_end = text[marker_start..].find(';')? + marker_start + 1;
+    let marker = &text[marker_start..marker_end];
+
+    let parts: Vec<&str> = marker.split("::").collect();
+    if parts.len() < 4 {
+        return None;
+    }
+
+    let gids_part = parts
+        .iter()
+        .find(|p| p.starts_with("GIDS="))
+        .map(|p| &p[5..])
+        .unwrap_or("");
+    let offs_part = parts
+        .iter()
+        .find(|p| p.starts_with("OFFS="))
+        .map(|p| &p[5..])
+        .unwrap_or("");
+    let chars_part = parts
+        .iter()
+        .find(|p| p.starts_with("CHARS="))
+        .map(|p| &p[6..])
+        .unwrap_or("");
+
+    let gids: Vec<u16> = if gids_part.is_empty() {
+        Vec::new()
+    } else {
+        gids_part
+            .split(',')
+            .filter_map(|s| s.parse::<u16>().ok())
+            .collect()
+    };
+
+    let offs: Vec<i64> = if offs_part.is_empty() {
+        Vec::new()
+    } else {
+        offs_part
+            .split(',')
+            .filter_map(|s| s.parse::<i64>().ok())
+            .collect()
+    };
+
+    let chars: Vec<char> = if chars_part.is_empty() {
+        Vec::new()
+    } else {
+        chars_part
+            .split('|')
+            .filter_map(|s| s.chars().next())
+            .collect()
+    };
+
+    // Build TJ array operand
+    let mut tj_array = Vec::new();
+    for (i, gid) in gids.iter().enumerate() {
+        let b1 = ((gid >> 8) & 0xff) as u8;
+        let b2 = (gid & 0xff) as u8;
+        let hex_bytes = vec![b1, b2];
+        tj_array.push(Object::String(hex_bytes, Default::default()));
+        if let Some(off) = offs.get(i) {
+            tj_array.push(Object::Integer(*off));
+        }
+    }
+
+    // Create the TJ operation
+    let operation = Operation::new("TJ", vec![Object::Array(tj_array)]);
+
+    // Build ToUnicode CMap
+    let mut cmap = String::new();
+    cmap.push_str("/CIDInit /ProcSet findresource begin\n12 dict begin\n/Version 1.0 def\n/Length 0 def\n/begincmap\n/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n/CMapName /GENPDFI def\n/CMapType 2 def\n1 begincodespacerange\n<0000> <FFFF>\nendcodespacerange\n");
+    cmap.push_str(&format!("{} beginbfchar\n", gids.len()));
+    for (i, gid) in gids.iter().enumerate() {
+        let b1 = ((gid >> 8) & 0xff) as u8;
+        let b2 = (gid & 0xff) as u8;
+        let src = format!("<{:02X}{:02X}>", b1, b2);
+        let uni = chars.get(i).map(|c| *c as u32).unwrap_or(0u32);
+        let dst = format!("<{:04X}>", uni);
+        cmap.push_str(&format!("{} {}\n", src, dst));
+    }
+    cmap.push_str("endbfchar\nendcmap\nCMapName currentdict /CMap defineresource pop\nend\nend\n");
+
+    Some(TJResult {
+        operation,
+        cmap: Some(cmap),
+    })
+}
+
+/// Post-process the PDF to add link annotations to the appropriate pages
 fn postprocess_pdf(
     buf: &[u8],
     page_annotations: Vec<Vec<LinkAnnotation>>,
 ) -> Result<Vec<u8>, Error> {
-    // First, do TJ post-processing
-    let processed = postprocess_tj_impl(buf)?;
-
-    // Then, add annotations to the PDF
-    add_annotations_to_pdf(&processed, page_annotations)
+    // Add annotations to the PDF (TJ post-processing is no longer needed since
+    // WriteCodepointsWithKerning already generates proper TJ operations)
+    add_annotations_to_pdf(buf, page_annotations)
 }
 
 /// Add link annotations to pages in the PDF
@@ -217,13 +252,16 @@ fn add_annotations_to_pdf(
             annot_dict.set(b"Type", Object::Name(b"Annot".to_vec()));
             annot_dict.set(b"Subtype", Object::Name(b"Link".to_vec()));
 
-            // Set the rectangle [left, bottom, right, top]
+            // Convert coordinates from mm to points (PDF uses points)
+            let mm_to_pt = |m: f32| -> f32 { m * (72.0_f32 / 25.4_f32) };
+
+            // Set the rectangle [left, bottom, right, top] in points
             let (x, y, w, h) = annotation.rect;
             let rect = vec![
-                Object::Real(x),
-                Object::Real(y),
-                Object::Real(x + w),
-                Object::Real(y + h),
+                Object::Real(mm_to_pt(x)),
+                Object::Real(mm_to_pt(y)),
+                Object::Real(mm_to_pt(x + w)),
+                Object::Real(mm_to_pt(y + h)),
             ];
             annot_dict.set(b"Rect", Object::Array(rect));
 
@@ -623,43 +661,10 @@ impl Renderer {
                 new_ops.push(printpdf::Op::BeginLayer {
                     layer_id: layer.layer_id.clone(),
                 });
-                // Transform layer ops: emulate TJ serialization for WriteCodepointsWithKerning
-                // by replacing the in-memory op with a standard WriteText op that contains
-                // the character sequence. This ensures the serialized PDF contains a
-                // Tj/TJ operator and remains text-extractable even if precise kerning
-                // adjustments are not encoded here (we may extend this later).
+                // Pass through operations directly - WriteCodepointsWithKerning already
+                // generates proper TJ operations when serialized by printpdf.
                 for op in layer.ops.clone().iter() {
-                    match op {
-                        printpdf::Op::WriteCodepointsWithKerning { font, cpk } => {
-                            // Build a compact ASCII marker that encodes glyph ids and offsets so
-                            // we can post-process the final PDF and replace the marker with a
-                            // proper TJ operator and a ToUnicode CMap.
-                            // Format: GENPDFI_CPK::<font_debug>::GIDS=gid,gid;OFFS=off,off;CHARS=...;
-                            let font_dbg = format!("{:?}", font);
-                            let gids: Vec<String> =
-                                cpk.iter().map(|(_, gid, _)| gid.to_string()).collect();
-                            let offs: Vec<String> =
-                                cpk.iter().map(|(off, _, _)| off.to_string()).collect();
-                            let chars_esc: String = cpk
-                                .iter()
-                                .map(|(_, _, ch)| ch.to_string())
-                                .collect::<Vec<_>>()
-                                .join("|");
-                            let marker = format!(
-                                "GENPDFI_CPK::{}::GIDS={}::OFFS={}::CHARS={};",
-                                font_dbg,
-                                gids.join(","),
-                                offs.join(","),
-                                chars_esc
-                            );
-                            let items = vec![printpdf::TextItem::Text(marker)];
-                            new_ops.push(printpdf::Op::WriteText {
-                                items,
-                                font: font.clone(),
-                            });
-                        }
-                        other => new_ops.push(other.clone()),
-                    }
+                    new_ops.push(op.clone());
                 }
                 new_ops.push(printpdf::Op::EndLayer {
                     layer_id: layer.layer_id.clone(),
@@ -1536,12 +1541,21 @@ impl<'p> Area<'p> {
 
         // `pdf_position.y` is already in PDF user-space (bottom-left origin), representing
         // the bottom-left corner of the image area. No need to subtract height again.
-        let left = pdf_point.x.0;
-        let bottom = pdf_point.y.0;
+        // Note: pdf_point.x and pdf_point.y are already in points (they came from conversion)
+        // We need to store them as mm for consistency with text annotations
+        let pt_to_mm = |pt: f32| -> f32 { pt * (25.4_f32 / 72.0_f32) };
+
+        let left_mm = pt_to_mm(pdf_point.x.0);
+        let bottom_mm = pt_to_mm(pdf_point.y.0);
+        let width_mm_final = pt_to_mm(width_pt.0);
+        let height_mm_final = pt_to_mm(height_pt.0);
 
         // Create annotation using our custom structure with the URI stored directly
-        self.layer
-            .add_annotation((left, bottom, width_pt.0, height_pt.0), uri.to_string());
+        // Store in mm so it can be converted to points consistently in add_annotations_to_pdf
+        self.layer.add_annotation(
+            (left_mm, bottom_mm, width_mm_final, height_mm_final),
+            uri.to_string(),
+        );
     }
 
     /// Draws a line with the given points and the given line style.
@@ -1651,10 +1665,12 @@ pub struct TextSection<'f, 'p> {
     font_cache: &'f fonts::FontCache,
     area: Area<'p>,
     is_first: bool,
+    cursor_y_positioned: bool, // Track if Y position has been set (to avoid overwriting it)
     metrics: fonts::Metrics,
     font: Option<(IndirectFontRef, u8)>,
     current_x_offset: Mm,
     cumulative_kerning: Mm,
+    first_char_offset: Mm, // Cumulative offset from first character adjustments
 }
 
 impl<'f, 'p> TextSection<'f, 'p> {
@@ -1670,22 +1686,30 @@ impl<'f, 'p> TextSection<'f, 'p> {
         area.layer.begin_text_section();
         area.layer.set_line_height(metrics.line_height);
 
+        // Don't position the cursor here - let the first text element (print_str or add_link) do it
+        // This way we avoid emitting conflicting Td operations
+
         Some(TextSection {
             font_cache,
             area,
             is_first: true,
+            cursor_y_positioned: false, // Y will be positioned by the first text element
             metrics,
             font: None,
             current_x_offset: Mm(0.0),
             cumulative_kerning: Mm(0.0),
+            first_char_offset: Mm(0.0),
         })
     }
 
-    fn set_text_cursor(&self, x_offset: Mm) {
-        let cursor = self
-            .area
-            .position(Position::new(x_offset, self.metrics.ascent));
+    fn set_text_cursor(&mut self, x_offset: Mm) {
+        // Position the cursor at the baseline of this text section
+        // The baseline is at metrics.ascent below the top of the area
+        let y_position = self.metrics.ascent;
+
+        let cursor = self.area.position(Position::new(x_offset, y_position));
         self.area.layer.set_text_cursor(cursor);
+        self.cursor_y_positioned = true;
     }
 
     fn set_font(&mut self, font: &IndirectFontRef, font_size: u8) {
@@ -1732,10 +1756,13 @@ impl<'f, 'p> TextSection<'f, 'p> {
         let s = s.as_ref();
 
         if self.is_first {
-            if let Some(first_c) = s.chars().next() {
-                let x_offset = style.char_left_side_bearing(self.font_cache, first_c) * -1.0;
-                self.set_text_cursor(x_offset);
-            }
+            let x_offset = if let Some(first_c) = s.chars().next() {
+                style.char_left_side_bearing(self.font_cache, first_c) * -1.0
+            } else {
+                Mm::from(0.0) // Empty string: no bearing offset
+            };
+            self.set_text_cursor(x_offset);
+            self.first_char_offset = x_offset;
             self.is_first = false;
         }
 
@@ -1829,61 +1856,52 @@ impl<'f, 'p> TextSection<'f, 'p> {
         let text = text.as_ref();
         let uri = uri.as_ref();
 
-        let kerning_positions: Vec<f32> = font.kerning(self.font_cache, text.chars());
+        // For the very first element, apply first character adjustment
+        if self.is_first {
+            let x_offset = if let Some(first_c) = text.chars().next() {
+                style.char_left_side_bearing(self.font_cache, first_c) * -1.0
+            } else {
+                Mm::from(0.0) // Empty string: no bearing offset
+            };
+            self.set_text_cursor(x_offset);
+            self.first_char_offset = x_offset;
+            self.is_first = false;
+        }
 
-        // Get current cursor position, including all accumulated offsets
+        // Calculate position using the same Y position as the text cursor
+        // The text cursor is placed at ascent, so annotations should be based on that position
         let current_pos = self.area.position(Position::new(
             self.current_x_offset + self.cumulative_kerning,
-            0.0,
+            self.metrics.ascent,
         ));
 
         let pdf_pos = self.area.layer.transform_position(current_pos);
         let text_width = style.text_width(self.font_cache, text);
         let left = pdf_pos.x.0;
-        let bottom = pdf_pos.y.0 - font.ascent(style.font_size()).0;
+        let descent = font.descent(style.font_size()).0;
+        let ascent = font.ascent(style.font_size()).0;
+        let bottom = pdf_pos.y.0 + descent;
         let width = text_width.0;
-        let height = font.ascent(style.font_size()).0 - font.descent(style.font_size()).0;
+        let height = ascent - descent;
 
-        // Add annotation using our custom structure
+        // Add annotation
         self.area
             .layer
             .add_annotation((left, bottom, width, height), uri.to_string());
-
-        // Handle first character positioning
-        if self.is_first {
-            if let Some(first_c) = text.chars().next() {
-                let x_offset = style.char_left_side_bearing(self.font_cache, first_c) * -1.0;
-                self.set_text_cursor(x_offset);
-            }
-            self.is_first = false;
-        }
-
-        let positions: Vec<i64> = kerning_positions
-            .clone()
-            .into_iter()
-            .map(|pos| (-pos * 1000.0) as i64)
-            .collect();
-
-        let codepoints: Vec<u16> = if font.is_builtin() {
-            encode_win1252(text)?
-        } else {
-            font.glyph_ids(&self.font_cache, text.chars())
-        };
 
         let pdf_font = self
             .font_cache
             .get_pdf_font(font)
             .expect("Could not find PDF font in font cache")
             .clone();
-
         self.area.layer.set_fill_color(style.color());
         self.set_font(&pdf_font, style.font_size());
 
-        // For built-in fonts, emit text as whole words/strings to avoid character-by-character spacing
-        if font.is_builtin() {
-            // Emit as a single WriteTextBuiltinFont op
-            let items = vec![printpdf::TextItem::Text(text.to_string())];
-            if let IndirectFontRef::Builtin(b) = pdf_font {
+        // Use the same rendering logic as print_str for consistency
+        let mut external_emitted = false;
+        match pdf_font {
+            IndirectFontRef::Builtin(b) => {
+                let items = vec![printpdf::TextItem::Text(text.to_string())];
                 self.area
                     .layer
                     .data
@@ -1891,36 +1909,38 @@ impl<'f, 'p> TextSection<'f, 'p> {
                     .ops
                     .push(printpdf::Op::WriteTextBuiltinFont { items, font: b });
             }
-        } else {
-            // Prefer emitting positioned codepoints when we have an external PDF font
-            match pdf_font {
-                IndirectFontRef::Builtin(b) => {
-                    let items = vec![printpdf::TextItem::Text(text.to_string())];
-                    if let IndirectFontRef::Builtin(b2) = pdf_font {
-                        self.area
-                            .layer
-                            .data
-                            .borrow_mut()
-                            .ops
-                            .push(printpdf::Op::WriteTextBuiltinFont { items, font: b2 });
-                    }
-                }
-                IndirectFontRef::External(fid) => {
-                    self.area.layer.write_positioned_codepoints(
-                        fid,
-                        positions,
-                        codepoints,
-                        text.chars(),
-                    );
-                }
+            IndirectFontRef::External(fid) => {
+                let kerning_positions = font.kerning(self.font_cache, text.chars());
+                let items = vec![printpdf::TextItem::Text(text.to_string())];
+                self.area
+                    .layer
+                    .data
+                    .borrow_mut()
+                    .ops
+                    .push(printpdf::Op::WriteText {
+                        items,
+                        font: fid.clone(),
+                    });
+
+                // Update aggregate offsets for the whole string
+                self.current_x_offset += text_width;
+                let kerning_sum = Mm::from(printpdf::Pt(f32::from(
+                    kerning_positions.iter().sum::<f32>() * f32::from(style.font_size()),
+                )));
+                self.cumulative_kerning += kerning_sum;
+
+                external_emitted = true;
             }
         }
 
-        // Update position tracking
-        self.current_x_offset += text_width;
+        // Update position tracking for the whole string when we didn't emit per-glyph
+        if !external_emitted {
+            self.current_x_offset += text_width;
+        }
 
         // For built-in fonts, we don't need kerning tracking since PDF viewers handle it
         if !font.is_builtin() {
+            let kerning_positions = font.kerning(self.font_cache, text.chars());
             let kerning_sum = Mm(kerning_positions.iter().sum::<f32>());
             self.cumulative_kerning += kerning_sum;
         }
