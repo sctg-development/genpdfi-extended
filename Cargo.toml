@@ -9,10 +9,10 @@ authors = [
     "Ismael Sh <me@theiskaa.com>",
     "Ronan Le Meillat",
 ]
-edition = "2018"
+edition = "2021"
 description = "User-friendly PDF generator written in pure Rust"
-homepage = "https://github.com/theiskaa/genpdfi"
-repository = "https://github.com/theiskaa/genpdfi"
+homepage = "https://github.com/sctg-development/genpdfi-extended"
+repository = "https://github.com/sctg-development/genpdfi-extended"
 keywords = ["pdf", "text", "layout"]
 categories = ["text-processing"]
 license = "Apache-2.0 OR MIT"
