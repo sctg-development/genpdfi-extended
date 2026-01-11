@@ -52,10 +52,7 @@ impl ImageSource {
                 let svg_dpi: f32 = svg.dpi.unwrap_or(300.0);
                 let width_px = svg.width.map(|px| px.0 as f32).unwrap_or(100.0);
                 let height_px = svg.height.map(|px| px.0 as f32).unwrap_or(100.0);
-                Size::new(
-                    mmpi * (width_px / svg_dpi),
-                    mmpi * (height_px / svg_dpi),
-                )
+                Size::new(mmpi * (width_px / svg_dpi), mmpi * (height_px / svg_dpi))
             }
         }
     }
@@ -220,16 +217,17 @@ impl Image {
         // Strip <mask> elements and mask attribute references before parsing.
         // See: SVG_MASK_BUG_ANALYSIS.md for details.
         let cleaned_svg = Self::strip_svg_masks(svg_content);
-        
+
         // Extract DPI from data-dpi attribute if present (embedded by microtex_rs)
         let dpi_from_svg = Self::extract_dpi_from_svg(&cleaned_svg);
-        
+
         let mut warnings = Vec::new();
-        let svg_xobj = printpdf::Svg::parse(&cleaned_svg, &mut warnings)
-            .map_err(|e| Error::new(
+        let svg_xobj = printpdf::Svg::parse(&cleaned_svg, &mut warnings).map_err(|e| {
+            Error::new(
                 format!("Failed to parse SVG: {}", e),
                 ErrorKind::InvalidData,
-            ))?;
+            )
+        })?;
 
         Ok(Image {
             source: ImageSource::Svg(svg_xobj),
@@ -281,26 +279,26 @@ impl Image {
     }
 
     /// Workaround for printpdf SVG <mask> parsing bug.
-    /// 
+    ///
     /// Removes <mask> element definitions and mask="url(#...)" attribute references
     /// from SVG content to prevent "Invalid dictionary reference" errors during parsing.
-    /// 
+    ///
     /// This is a temporary workaround until printpdf properly supports SVG mask elements.
     fn strip_svg_masks(svg_content: &str) -> String {
         let mut result = svg_content.to_string();
-        
+
         // Remove <mask ...>...</mask> blocks using simple string manipulation
         // This is safer than complex state machines
         while let Some(start) = result.find("<mask ") {
             // Find the closing > of the opening tag
             if let Some(open_end) = result[start..].find('>') {
                 let open_end = start + open_end + 1;
-                
+
                 // Find the closing </mask> tag
                 if let Some(close_pos) = result[open_end..].find("</mask>") {
                     let close_pos = open_end + close_pos;
                     let close_end = close_pos + 7; // len("</mask>")
-                    
+
                     // Remove the entire mask element
                     result.drain(start..close_end);
                 } else {
@@ -312,26 +310,26 @@ impl Image {
                 break;
             }
         }
-        
+
         // Remove mask="url(#...)" attributes
         while let Some(start) = result.find("mask=\"url(#") {
             // Find the closing )"
             if let Some(end) = result[start..].find("\")") {
                 let end = start + end + 2; // Include the ")
-                // Also remove trailing space if present
+                                           // Also remove trailing space if present
                 let trim_space = if result.len() > end && result[end..].starts_with(' ') {
                     1
                 } else {
                     0
                 };
-                
+
                 result.drain(start..end + trim_space);
             } else {
                 // Malformed mask attribute, stop trying
                 break;
             }
         }
-        
+
         result
     }
 
@@ -357,11 +355,12 @@ impl Image {
     /// let image = Image::from_svg_bytes(svg_bytes).expect("create from bytes");
     /// ```
     pub fn from_svg_bytes(svg_bytes: &[u8]) -> Result<Self, Error> {
-        let svg_content = std::str::from_utf8(svg_bytes)
-            .map_err(|e| Error::new(
+        let svg_content = std::str::from_utf8(svg_bytes).map_err(|e| {
+            Error::new(
                 format!("SVG bytes are not valid UTF-8: {}", e),
                 ErrorKind::InvalidData,
-            ))?;
+            )
+        })?;
         Self::from_svg_string(svg_content)
     }
 
@@ -542,10 +541,7 @@ impl Image {
     /// Computes size in mm for a given explicit scale (without modifying `self.scale`).
     fn size_with_scale(&self, scale: Scale) -> Size {
         let intrinsic = self.intrinsic_size();
-        Size::new(
-            scale.x * intrinsic.width.0,
-            scale.y * intrinsic.height.0,
-        )
+        Size::new(scale.x * intrinsic.width.0, scale.y * intrinsic.height.0)
     }
 
     /// Sets the clockwise rotation of the image around the bottom left corner.
@@ -742,7 +738,7 @@ impl Element for Image {
         // don't render it and signal that we need more space (new page).
         let image_bottom = position.y + bb_size.height;
         let available_height = area.size().height;
-        
+
         if image_bottom > available_height {
             // Image overflows the page - don't render it and signal that we need more space
             result.has_more = true;
@@ -804,13 +800,7 @@ impl Element for Image {
                         self.dpi,
                     );
                 } else {
-                    area.add_image(
-                        raster,
-                        position,
-                        effective_scale,
-                        self.rotation,
-                        self.dpi,
-                    );
+                    area.add_image(raster, position, effective_scale, self.rotation, self.dpi);
                 }
             }
         }
@@ -1228,7 +1218,10 @@ mod tests {
         ));
         let img = Image::from_dynamic_image(rgba).expect("should accept RGBA image");
         // data should still have alpha channel until render-time
-        assert!(img.raster_data().map(|r| r.color().has_alpha()).unwrap_or(false));
+        assert!(img
+            .raster_data()
+            .map(|r| r.color().has_alpha())
+            .unwrap_or(false));
     }
 
     #[cfg(feature = "images")]
@@ -1418,9 +1411,15 @@ mod tests {
         let raster_image = Image::from_dynamic_image(raster_img).expect("create raster");
 
         // SVG image should not have raster data
-        assert!(svg_image.raster_data().is_none(), "SVG should not have raster data");
+        assert!(
+            svg_image.raster_data().is_none(),
+            "SVG should not have raster data"
+        );
 
         // Raster image should have raster data
-        assert!(raster_image.raster_data().is_some(), "Raster should have raster data");
+        assert!(
+            raster_image.raster_data().is_some(),
+            "Raster should have raster data"
+        );
     }
 }
