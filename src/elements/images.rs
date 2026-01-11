@@ -221,6 +221,9 @@ impl Image {
         // See: SVG_MASK_BUG_ANALYSIS.md for details.
         let cleaned_svg = Self::strip_svg_masks(svg_content);
         
+        // Extract DPI from data-dpi attribute if present (embedded by microtex_rs)
+        let dpi_from_svg = Self::extract_dpi_from_svg(&cleaned_svg);
+        
         let mut warnings = Vec::new();
         let svg_xobj = printpdf::Svg::parse(&cleaned_svg, &mut warnings)
             .map_err(|e| Error::new(
@@ -237,9 +240,44 @@ impl Image {
             fit_to_page_height: None,
             rotation: Rotation::default(),
             background_color: None,
-            dpi: None,
+            dpi: dpi_from_svg,
             link: None,
         })
+    }
+
+    /// Extracts DPI from the `data-dpi` attribute in SVG content.
+    ///
+    /// This function looks for the `data-dpi` attribute in the SVG root element,
+    /// which is embedded by microtex_rs when rendering LaTeX formulas.
+    ///
+    /// # Arguments
+    ///
+    /// * `svg_content` - The SVG string to search for the `data-dpi` attribute.
+    ///
+    /// # Returns
+    ///
+    /// `Some(dpi)` if the attribute is found and contains a valid integer,
+    /// `None` otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```ignore
+    /// let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" data-dpi="720" width="100" height="50">...</svg>"#;
+    /// let dpi = Image::extract_dpi_from_svg(svg);
+    /// assert_eq!(dpi, Some(720.0));
+    /// ```
+    fn extract_dpi_from_svg(svg_content: &str) -> Option<f32> {
+        // Look for data-dpi="XXX" pattern in the SVG content
+        if let Some(start) = svg_content.find("data-dpi=\"") {
+            let search_str = &svg_content[start + 10..]; // Skip "data-dpi=\""
+            if let Some(end) = search_str.find('"') {
+                let dpi_str = &search_str[..end];
+                if let Ok(dpi_val) = dpi_str.parse::<i32>() {
+                    return Some(dpi_val as f32);
+                }
+            }
+        }
+        None
     }
 
     /// Workaround for printpdf SVG <mask> parsing bug.
@@ -699,7 +737,20 @@ impl Element for Image {
         // (0,0) when it was rotated in any way.
         position += bb_origin;
 
-        // Insert/render the image with the overridden/calculated position.
+        // CHECK FOR OVERFLOW BEFORE RENDERING
+        // If the image (with bounding box) doesn't fit in the available area,
+        // don't render it and signal that we need more space (new page).
+        let image_bottom = position.y + bb_size.height;
+        let available_height = area.size().height;
+        
+        if image_bottom > available_height {
+            // Image overflows the page - don't render it and signal that we need more space
+            result.has_more = true;
+            result.size = Size::new(0, 0); // Don't consume space
+            return Ok(result);
+        }
+
+        // Only reach here if image FITS - now render it
         match &self.source {
             ImageSource::Svg(svg) => {
                 // SVG rendering - no alpha compositing needed, printpdf handles it
@@ -769,9 +820,7 @@ impl Element for Image {
             area.add_image_link(position, true_size, self.rotation, url);
         }
 
-        // Always false as we can't safely do this unless we want to try to do "sub-images".
-        // This is technically possible with the `image` package, but it is potentially more
-        // work than necessary. I'd rather support an "Auto-Scale" method to fit to area.
+        // Image fits and was successfully rendered
         result.has_more = false;
 
         Ok(result)
