@@ -20,6 +20,7 @@ Highlights
 - Font management with caching, embedding, and metrics (deterministic tests use bundled fonts in `fonts/`).
 - Robust text serialization for embedded fonts: strings are emitted as full text so PDF viewers apply native kerning and text extractors can recover readable text (prevents glyph-id remapping issues when subsetting).
 - Optional `images` feature to embed common image formats (PNG, JPEG, etc.).
+- Optional `latex` feature to render LaTeX formulas to SVG using `microtex_rs` and embed them as images.
 - Executable doc examples (no `no_run`/`ignore`) to improve documentation quality.
 - CI workflow that runs tests, generates Cobertura coverage (via tarpaulin) and publishes rustdoc to GitHub Pages.
 

@@ -1,6 +1,9 @@
+[workspace]
+members = ["."]
+
 [package]
 name = "genpdfi_extended"
-version = "0.3.4"
+version = "0.4.0"
 authors = [
     "Robin Krahl <robin.krahl@ireas.org>",
     "Ismael Sh <me@theiskaa.com>",
@@ -33,6 +36,12 @@ optional = true
 version = "0.8"
 optional = true
 
+[dependencies.microtex_rs]
+git = "https://github.com/sctg-development/microtex_rs"
+branch = "main"
+# path = "./microtex_rs"
+optional = true
+
 [dependencies.printpdf]
 version = "0.8.2"
 features = ["html", "gif", "jpeg", "png", "webp"]
@@ -43,11 +52,13 @@ default-features = false
 features = ["add", "add_assign", "from", "into", "mul", "mul_assign", "sum"]
 
 [dev-dependencies]
+microtex_rs = { git = "https://github.com/sctg-development/microtex_rs", branch = "main" }
+# microtex_rs = { path = "./microtex_rs" }
 float-cmp = { version = "0.10.0", default-features = false, features = ["std"] }
 hyphenation = { version = "0.8", features = ["embed_en-us"] }
 tempfile = "3"
 assert_cmd = "2"
-predicates = "2"
+predicates = "3.1.3"
 
 [features]
 default = ["images"]
@@ -60,6 +71,7 @@ images = [
     "image/bmp",
     "image/tiff",
 ]
+latex = ["microtex_rs"]
 
 [package.metadata.docs.rs]
 all-features = true

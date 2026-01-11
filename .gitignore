@@ -35,3 +35,4 @@ assets/data
 *.pdf
 subset_test.ttf
 tmp/
+cobertura.xml

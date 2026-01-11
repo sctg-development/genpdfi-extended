@@ -40,6 +40,9 @@
 #[cfg(feature = "images")]
 mod images;
 
+#[cfg(feature = "latex")]
+mod latex;
+
 use std::collections;
 use std::iter;
 use std::mem;
@@ -54,6 +57,9 @@ use crate::{Alignment, Context, Element, Margins, Mm, Position, RenderResult, Si
 
 #[cfg(feature = "images")]
 pub use images::Image;
+
+#[cfg(feature = "latex")]
+pub use latex::Latex;
 
 /// Helper trait for creating boxed elements.
 pub trait IntoBoxedElement {
