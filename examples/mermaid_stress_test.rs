@@ -54,7 +54,7 @@ fn main() {
 
         // Title
         doc.push(
-            elements::Paragraph::new("Mermaid Stress Test: Multiple Diagrams")
+            elements::Paragraph::new("")
                 .styled_string(
                     "Mermaid Stress Test: Multiple Diagrams",
                     style::Style::new().with_font_size(16).bold(),
@@ -215,7 +215,7 @@ gitGraph
         for (idx, (title, diagram)) in diagrams.iter().enumerate() {
             doc.push(elements::Paragraph::new(""));
             doc.push(
-                elements::Paragraph::new(*title).styled_string(
+                elements::Paragraph::new("").styled_string(
                     *title,
                     style::Style::new().with_font_size(11).bold(),
                 ),
@@ -240,7 +240,7 @@ gitGraph
 
         // Summary
         doc.push(elements::Paragraph::new(""));
-        doc.push(elements::Paragraph::new("=== TEST SUMMARY ===").styled_string(
+        doc.push(elements::Paragraph::new("").styled_string(
             "=== TEST SUMMARY ===",
             style::Style::new().with_font_size(12).bold(),
         ));
