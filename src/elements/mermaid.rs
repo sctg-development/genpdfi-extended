@@ -130,6 +130,119 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
         }
     }
 
+    /// Apply a direct scale to the provided SVG markup by inserting a `<g transform="scale(...)">`
+    /// around the SVG contents and multiplying simple numeric `width`/`height` attributes when present.
+    /// It also adjusts a `viewBox` attribute's width/height so that SVGs that rely on viewBox
+    /// sizing are not cropped after applying the transform.
+    ///
+    /// This is intentionally lightweight (string-based) to avoid pulling in an XML parser as a
+    /// dependency. It handles common cases emitted by Mermaid and similar tools, but leaves
+    /// complex or non-numeric attributes unchanged.
+    pub(crate) fn apply_scale_to_svg(svg: &str, scale: f32) -> String {
+        if (scale - 1.0).abs() < f32::EPSILON {
+            return svg.to_string();
+        }
+
+        // Helper to replace numeric attrs like width="123" or width="123px"
+        fn replace_dim_attr(s: &str, attr: &str, scale: f32) -> String {
+            let mut out = s.to_string();
+            let key = format!("{}=\"", attr);
+            if let Some(pos) = out.find(&key) {
+                let val_start = pos + key.len();
+                if let Some(val_end_rel) = out[val_start..].find('"') {
+                    let val_end = val_start + val_end_rel;
+                    let raw = &out[val_start..val_end];
+                    // Detect 'px' unit and strip it for numeric parsing
+                    let has_px = raw.ends_with("px");
+                    let stripped = raw.trim_end_matches("px");
+                    if let Ok(n) = stripped.parse::<f32>() {
+                        let newv = n * scale;
+                        // Prefer integer formatting when the value is whole
+                        let new_str = if (newv - newv.trunc()).abs() < 1e-6 {
+                            format!("{}", newv as i64)
+                        } else {
+                            // Use default formatting for non-integers
+                            format!("{}", newv)
+                        };
+                        let new_full = if has_px { format!("{}px", new_str) } else { new_str };
+                        let old = format!("{}=\"{}\"", attr, raw);
+                        let new = format!("{}=\"{}\"", attr, new_full);
+                        out = out.replacen(&old, &new, 1);
+                    }
+                }
+            }
+            out
+        }
+
+        // Helper to scale viewBox="minx miny width height" by multiplying width/height.
+        fn replace_viewbox(s: &str, scale: f32) -> String {
+            let mut out = s.to_string();
+            let key = "viewBox=\"";
+            if let Some(pos) = out.find(key) {
+                let val_start = pos + key.len();
+                if let Some(val_end_rel) = out[val_start..].find('"') {
+                    let val_end = val_start + val_end_rel;
+                    let raw = &out[val_start..val_end];
+                    // Split into 4 numbers; be permissive about whitespace
+                    let parts: Vec<&str> = raw.split_whitespace().collect();
+                    if parts.len() == 4 {
+                        if let (Ok(minx), Ok(miny), Ok(w), Ok(h)) = (
+                            parts[0].parse::<f32>(),
+                            parts[1].parse::<f32>(),
+                            parts[2].parse::<f32>(),
+                            parts[3].parse::<f32>(),
+                        ) {
+                            let neww = w * scale;
+                            let newh = h * scale;
+                            let new_raw = format!("{} {} {} {}", minx, miny, // keep minx/miny unchanged
+                                                  // Prefer integer formatting when possible
+                                                  if (neww - neww.trunc()).abs() < 1e-6 { format!("{}", neww as i64) } else { format!("{}", neww) },
+                                                  if (newh - newh.trunc()).abs() < 1e-6 { format!("{}", newh as i64) } else { format!("{}", newh) });
+                            let old = format!("viewBox=\"{}\"", raw);
+                            let new = format!("viewBox=\"{}\"", new_raw);
+                            out = out.replacen(&old, &new, 1);
+                        }
+                    }
+                }
+            }
+            out
+        }
+
+        // Find the opening <svg ...> tag's end so we can insert a <g> wrapper immediately after it
+        if let Some(start) = svg.find("<svg") {
+            if let Some(rel_gt) = svg[start..].find('>') {
+                let open_end = start + rel_gt + 1;
+                let mut opening = svg[start..open_end].to_string();
+
+                // Update width/height and viewBox in the opening tag
+                opening = replace_dim_attr(&opening, "width", scale);
+                opening = replace_dim_attr(&opening, "height", scale);
+                opening = replace_viewbox(&opening, scale);
+
+                // Find closing tag so we can place the closing </g> before it
+                if let Some(close_pos) = svg.rfind("</svg>") {
+                    let mut out = String::with_capacity(svg.len() + 64);
+                    out.push_str(&svg[..start]);
+                    out.push_str(&opening);
+                    out.push_str(&format!("<g transform=\"scale({})\">", scale));
+                    out.push_str(&svg[open_end..close_pos]);
+                    out.push_str("</g>");
+                    out.push_str("</svg>");
+                    return out;
+                }
+
+                // If no closing tag found, fall back to a less precise insertion
+                let mut out = svg.to_string();
+                out.insert_str(open_end, &format!("<g transform=\"scale({})\">", scale));
+                out.push_str("</g>");
+                return out;
+            }
+        }
+
+        // Fallback: return original if we couldn't apply a transformation safely
+        svg.to_string()
+    }
+
     impl Element for Mermaid {
         fn render(&mut self, context: &Context, area: render::Area<'_>, style: Style) -> Result<RenderResult, Error> {
             // Render diagram either as SVG or PNG (raster fallback)
@@ -155,7 +268,13 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
                     .replace("<BR>", "<br/>")
             }
 
-            let sanitized = sanitize_svg_for_printpdf(&svg);
+            // Apply an optional SVG-scale transform before sanitizing and parsing.
+            let scaled_svg = if self.scale != 1.0 {
+                apply_scale_to_svg(&svg, self.scale)
+            } else {
+                svg.clone()
+            };
+            let sanitized = sanitize_svg_for_printpdf(&scaled_svg);
 
             // Prefer the sanitized SVG; if that fails, try the original raw SVG so we don't hide
             // surprising parsing behavior. If both fail and debugging is enabled, dump raw SVG.
@@ -233,6 +352,9 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
 pub struct Mermaid {
     diagram: String,
 
+    /// Scaling factor applied directly to the generated SVG. A value of 1.0 means no scaling.
+    scale: f32,
+
     /// Positioning and presentation helpers mirrored from `Image`.
     alignment: Alignment,
     position: Option<Position>,
@@ -245,6 +367,7 @@ impl Mermaid {
     pub fn new<S: Into<String>>(diagram: S) -> Self {
         Mermaid {
             diagram: diagram.into(),
+            scale: 1.0,
             alignment: Alignment::default(),
             position: None,
             link: None,
@@ -273,6 +396,15 @@ impl Mermaid {
     /// Attach a hyperlink to the rendered SVG.
     pub fn with_link<S: Into<String>>(mut self, link: S) -> Self {
         self.link = Some(link.into());
+        self
+    }
+
+    /// Set the scale to apply directly to the generated SVG.
+    ///
+    /// The scaling is applied to the SVG markup (a wrapper `<g transform="scale(...)">`
+    /// is inserted) and numeric `width`/`height` attributes are multiplied accordingly.
+    pub fn with_scale(mut self, s: f32) -> Self {
+        self.scale = s;
         self
     }
 }
@@ -367,5 +499,29 @@ mod tests {
             sanitize_svg_for_printpdf(input)
         };
         assert_eq!(got, "<p>Line1<br/>Line2<br/>Line3<br/>End<br/></p>");
+    }
+
+    #[test]
+    fn apply_scale_to_svg_works() {
+        let input = "<svg width=\"100\" height=\"50\" viewBox=\"0 0 100 50\"><rect /></svg>";
+        let got = inner::apply_scale_to_svg(input, 2.0);
+        assert!(got.contains("transform=\"scale(2)\""));
+        assert!(got.contains("width=\"200\""));
+        assert!(got.contains("height=\"100\""));
+        assert!(got.contains("viewBox=\"0 0 200 100\""));
+    }
+
+    #[test]
+    fn apply_scale_to_svg_viewbox_only_and_px() {
+        // Case with only viewBox (no explicit width/height): the viewBox width/height should grow
+        let input = "<svg viewBox=\"0 0 100 50\"><rect /></svg>";
+        let got = inner::apply_scale_to_svg(input, 2.0);
+        assert!(got.contains("viewBox=\"0 0 200 100\""));
+
+        // Case with px units
+        let input2 = "<svg width=\"100px\" height=\"50px\"><rect /></svg>";
+        let got2 = inner::apply_scale_to_svg(input2, 1.5);
+        assert!(got2.contains("width=\"150px\""));
+        assert!(got2.contains("height=\"75px\""));
     }
 }

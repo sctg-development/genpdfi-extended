@@ -225,7 +225,7 @@ gitGraph
             // Pre-validate rendering so a single bad diagram won't abort PDF generation.
             match elements::Mermaid::render_svg(diagram) {
                 Ok(_) => {
-                    let mer = elements::Mermaid::new(*diagram).with_alignment(Alignment::Center);
+                    let mer = elements::Mermaid::new(*diagram).with_alignment(Alignment::Center).with_scale(2.0);
                     doc.push(mer);
                     println!("✓ Diagram {} queued for rendering", idx + 1);
                     success_count += 1;
