@@ -1,9 +1,10 @@
-//! Stress Test: Many Mermaid Diagrams in One Document
+//! Stress Test: Mermaid Diagrams with Automatic Scaling
 //!
-//! This example renders multiple Mermaid diagrams to verify the `mermaid` feature
-//! and the transformation to SVG embedded in the PDF work as expected.
+//! This example renders the same set of Mermaid diagrams as
+//! `mermaid_stress_test.rs` but uses the `Mermaid::with_auto_scale()` API to
+//! automatically cap the rendered diagram at 90% of the page width/height.
 //!
-//! Run with: cargo run --example mermaid_stress_test --features "images,mermaid"
+//! Run with: cargo run --example mermaid_auto_scale --features "images,mermaid"
 
 use std::fs;
 use std::path::PathBuf;
@@ -13,17 +14,15 @@ use genpdfi_extended::{elements, fonts, style, Alignment, Document};
 fn main() {
     if !cfg!(feature = "mermaid") {
         eprintln!("This example requires the 'mermaid' feature to be enabled.");
-        eprintln!("Run with: cargo run --example mermaid_stress_test --features 'images,mermaid'");
+        eprintln!("Run with: cargo run --example mermaid_auto_scale --features 'images,mermaid'");
         return;
     }
 
     #[cfg(feature = "mermaid")]
     {
-        // Quick runtime check: ensure headless Chrome is available before building the PDF.
-        // This avoids a long error during PDF generation on systems without Chrome. We use the
-        // shared singleton so the example also warms up the global browser instance.
+        // Warm up / check headless Chrome availability
         match elements::Mermaid::ensure_browser() {
-            Ok(_) => println!("Headless Chrome appears usable; proceeding with Mermaid stress test..."),
+            Ok(_) => println!("Headless Chrome appears usable; proceeding with Mermaid auto-scale test..."),
             Err(e) => {
                 eprintln!("Headless Chrome is not available or failed to start: {}", e);
                 eprintln!("Install Chrome / Chromium and ensure it's runnable in headless mode to run this example.");
@@ -31,15 +30,13 @@ fn main() {
             }
         }
 
-        println!("Stress Testing: Rendering multiple Mermaid diagrams...\n");
+        println!("Rendering diagrams with automatic scaling (max 90% of page dims)...\n");
 
-        // Prepare output directory
         let out_dir = PathBuf::from("examples/output");
         fs::create_dir_all(&out_dir).expect("create examples/output dir");
 
         // Load font
         let font_data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
-
         let fd = fonts::FontData::new(font_data, None).expect("font data");
         let family = fonts::FontFamily {
             regular: fd.clone(),
@@ -48,22 +45,20 @@ fn main() {
             bold_italic: fd.clone(),
         };
 
-        // Create document
         let mut doc = Document::new(family);
-        doc.set_title("Mermaid Stress Test - Multiple Diagrams");
+        doc.set_title("Mermaid Auto Scale Test - Multiple Diagrams");
 
-        // Title
         doc.push(
             elements::Paragraph::new("")
                 .styled_string(
-                    "Mermaid Stress Test: Multiple Diagrams",
+                    "Mermaid Auto Scale Test: Multiple Diagrams",
                     style::Style::new().with_font_size(16).bold(),
                 ),
         );
-        doc.push(elements::Paragraph::new("This example renders several simple Mermaid diagrams."));
+        doc.push(elements::Paragraph::new("This example renders several Mermaid diagrams using `with_auto_scale()`."));
         doc.push(elements::Paragraph::new(""));
 
-        // A set of simple diagrams to render
+        // The same diagrams used in mermaid_stress_test.rs
         let diagrams = vec![
             ("1. Simple Flow", r#"---
 title: Node
@@ -136,7 +131,6 @@ stateDiagram-v2
     dateFormat  YYYY-MM-DD
     title       Adding GANTT diagram functionality to mermaid
     excludes    weekends
-    %% (`excludes` accepts specific dates in YYYY-MM-DD format, days of the week ("sunday") or "weekends", but not the word "weekdays".)
 
     section A section
     Completed task            :done,    des1, 2014-01-06,2014-01-08
@@ -207,7 +201,59 @@ gitGraph
          : Google
     2005 : YouTube
     2006 : Twitter
-"#),
+"#),("11. AtMega32U4",r#"graph TB
+    subgraph MCU["ATMega32u4 - Pins"]
+        I2C_SDA["D2 - SDA"]
+        I2C_SCL["D3 - SCL"]
+        SPI_CS_TEC["D10 - CS_TEC"]
+        SPI_CS_LASER["D9 - CS_LASER"]
+        SPI_MOSI["D16 - MOSI"]
+        SPI_SCK["D15 - SCK"]
+        GPIO_TEC["D4 - ON_OFF_TEC"]
+        GPIO_LASER["D5 - ON_OFF_LASER"]
+        GPIO_FAULT["D6 - FAULT_READ"]
+    end
+  
+    subgraph ADC["ADS1115 - Monitoring"]
+        ADC_A0["A0 - I_TEC"]
+        ADC_A1["A1 - I_LASER"]
+        ADC_A2["A2 - TEMP"]
+        ADC_A3["A3 - V_TEC"]
+    end
+  
+    subgraph DAC["DACs de contrôle"]
+        DAC_TEC["LTC2641<br/>TEC Control"]
+        DAC_LASER["LTC2641<br/>Laser Control"]
+    end
+  
+    subgraph DL150["Module DL150"]
+        TEC["TEC Driver"]
+        LASER["Laser Driver"]
+        SENS["Capteurs"]
+    end
+  
+    I2C_SDA -->|"I2C Data"| ADC
+    I2C_SCL -->|"I2C Clock"| ADC
+  
+    SPI_CS_TEC -->|"Chip Select"| DAC_TEC
+    SPI_CS_LASER -->|"Chip Select"| DAC_LASER
+    SPI_MOSI -->|"Data"| DAC_TEC
+    SPI_MOSI -->|"Data"| DAC_LASER
+    SPI_SCK -->|"Clock"| DAC_TEC
+    SPI_SCK -->|"Clock"| DAC_LASER
+  
+    GPIO_TEC -->|"Enable"| TEC
+    GPIO_LASER -->|"Enable"| LASER
+    GPIO_FAULT <-->|"Status"| DL150
+  
+    DAC_TEC -->|"Analog Out"| TEC
+    DAC_LASER -->|"Analog Out"| LASER
+  
+    SENS -->|"I_TEC"| ADC_A0
+    SENS -->|"I_LASER"| ADC_A1
+    SENS -->|"Temp"| ADC_A2
+    SENS -->|"V_TEC"| ADC_A3
+"#)
         ];
 
         let mut success_count = 0usize;
@@ -220,13 +266,19 @@ gitGraph
                     style::Style::new().with_font_size(11).bold(),
                 ),
             );
-            doc.push(elements::Paragraph::new(format!("Mermaid source: {}", diagram)));
+            // Use the document's default font family (a `fonts::FontFamily<fonts::Font>`) so
+            // the `Style::with_font_family` signature matches `FontFamily<Font>`.
 
-            // Queue the Mermaid element for rendering. We intentionally do not pre-validate
-            // here because opening a new tab and navigating/reloading the helper page for each
-            // validation is expensive; rendering will occur later when the document is rendered.
-            // This avoids double compilation and significantly reduces runtime for many diagrams.
-            let mer = elements::Mermaid::new(*diagram).with_alignment(Alignment::Center).with_scale(2.0);
+            doc.push(elements::Paragraph::new("").styled_string(
+                format!("Mermaid source: {}", diagram),
+                style::Style::new().with_font_size(8),
+            ));
+
+            // Use original scaling
+            let mer = elements::Mermaid::new(*diagram).with_alignment(Alignment::Center);
+            doc.push(mer);
+            // Use automatic scaling rather than a fixed scale
+            let mer = elements::Mermaid::new(*diagram).with_alignment(Alignment::Center).with_auto_scale();
             doc.push(mer);
             println!("✓ Diagram {} queued for rendering", idx + 1);
             success_count += 1;
@@ -241,13 +293,13 @@ gitGraph
         doc.push(elements::Paragraph::new(format!("Total diagrams: {}", success_count)));
 
         // Output document
-        let output_path = out_dir.join("mermaid_stress_test.pdf");
+        let output_path = out_dir.join("mermaid_auto_scale.pdf");
         doc.render_to_file(&output_path)
             .expect("Failed to render PDF with Mermaid diagrams");
 
         println!();
         println!("{}", "=".repeat(70));
-        println!("✓ Stress test PDF generated: {}", output_path.display());
+        println!("✓ Auto-scale stress test PDF generated: {}", output_path.display());
         println!("{}", "=".repeat(70));
         println!();
         println!("Results:  Successful: {}", success_count);

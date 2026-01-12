@@ -243,6 +243,153 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
         svg.to_string()
     }
 
+    /// Simple sanitizer used before passing SVGs to `printpdf`.
+    pub(crate) fn sanitize_svg_for_printpdf(s: &str) -> String {
+        s.replace("<br />", "<br/>")
+            .replace("<br >", "<br/>")
+            .replace("<BR />", "<br/>")
+            .replace("<BR >", "<br/>")
+            .replace("<br>", "<br/>")
+            .replace("<BR>", "<br/>")
+    }
+
+    /// Fast heuristic to extract intrinsic width/height in *pixels* from an SVG string.
+    ///
+    /// We look for `width="..."` / `height="..."` (optionally with `px`) or a `viewBox`
+    /// and return `(width_px, height_px)` on success. This avoids invoking the slower
+    /// `printpdf::Svg::parse` for the common case where dimensions are explicit in the SVG.
+    fn extract_svg_intrinsic_px(s: &str) -> Option<(f32, f32)> {
+        // width/height attributes
+        if let Some(wpos) = s.find("width=\"") {
+            let start = wpos + 7; // skip width="
+            if let Some(rel_end) = s[start..].find('"') {
+                let raw = &s[start..start + rel_end];
+                let stripped = raw.trim_end_matches("px");
+                if let Ok(w) = stripped.parse::<f32>() {
+                    // try height as well
+                    if let Some(hpos) = s.find("height=\"") {
+                        let hstart = hpos + 8;
+                        if let Some(hrel_end) = s[hstart..].find('"') {
+                            let hraw = &s[hstart..hstart + hrel_end];
+                            let hstripped = hraw.trim_end_matches("px");
+                            if let Ok(h) = hstripped.parse::<f32>() {
+                                return Some((w, h));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // viewBox: 'minx miny width height'
+        if let Some(vpos) = s.find("viewBox=\"") {
+            let vstart = vpos + 9;
+            if let Some(vrel_end) = s[vstart..].find('"') {
+                let vraw = &s[vstart..vstart + vrel_end];
+                let parts: Vec<&str> = vraw.split_whitespace().collect();
+                if parts.len() == 4 {
+                    if let (Ok(_minx), Ok(_miny), Ok(w), Ok(h)) = (
+                        parts[0].parse::<f32>(),
+                        parts[1].parse::<f32>(),
+                        parts[2].parse::<f32>(),
+                        parts[3].parse::<f32>(),
+                    ) {
+                        return Some((w, h));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Extract data-dpi="NNN" if present (used when SVGs embed DPI metadata).
+    fn extract_dpi_from_svg(s: &str) -> Option<f32> {
+        if let Some(start) = s.find("data-dpi=\"") {
+            let search = &s[start + 10..];
+            if let Some(end) = search.find('"') {
+                let dpi_str = &search[..end];
+                if let Ok(v) = dpi_str.parse::<i32>() {
+                    return Some(v as f32);
+                }
+            }
+        }
+        None
+    }
+
+    /// Given an SVG and a candidate scale, determine the final scale so that the
+    /// rendered image does not exceed 90% of the provided page width/height. The
+    /// function returns a scale that is at most `candidate_scale`.
+    ///
+    /// This implementation prefers a fast string-based extraction of `width`/`height`
+    /// or `viewBox` to avoid invoking the slow SVG parser on every diagram. Only if
+    /// these heuristics fail do we fall back to a full parse.
+    pub(crate) fn compute_auto_scale(svg: &str, candidate_scale: f32, page_size: Size) -> (f32, Option<crate::elements::Image>) {
+        // Fast path: extract width/height in pixels from attributes or viewBox
+        if let Some((w_px, h_px)) = extract_svg_intrinsic_px(svg) {
+            // Determine DPI (default 300 if not present)
+            let dpi = extract_dpi_from_svg(svg).unwrap_or(300.0);
+            let mmpi: f32 = 25.4; // mm per inch
+            let intrinsic_w_mm = mmpi * (w_px / dpi);
+            let intrinsic_h_mm = mmpi * (h_px / dpi);
+            let allowed_w = 0.9 * page_size.width.as_f32();
+            let allowed_h = 0.9 * page_size.height.as_f32();
+            if intrinsic_w_mm <= 0.0 || intrinsic_h_mm <= 0.0 {
+                return (candidate_scale, None);
+            }
+            let req_w = allowed_w / intrinsic_w_mm;
+            let req_h = allowed_h / intrinsic_h_mm;
+            let required_scale = req_w.min(req_h);
+            return (candidate_scale.min(required_scale.max(1e-6)), None);
+        }
+
+        // Slow path: try parsing the unscaled SVG to get accurate intrinsic size
+        let preprocessed = strip_slice_class_from_path_tags(svg);
+        let sanitized = sanitize_svg_for_printpdf(&preprocessed);
+        if let Ok(mut img) = crate::elements::Image::from_svg_string(&sanitized) {
+            let intrinsic = img.get_intrinsic_size();
+            let allowed_w = 0.9 * page_size.width.as_f32();
+            let allowed_h = 0.9 * page_size.height.as_f32();
+            if intrinsic.width.as_f32() <= 0.0 || intrinsic.height.as_f32() <= 0.0 {
+                return (candidate_scale, None);
+            }
+            let req_w = allowed_w / intrinsic.width.as_f32();
+            let req_h = allowed_h / intrinsic.height.as_f32();
+            let required_scale = req_w.min(req_h);
+            let used = candidate_scale.min(required_scale.max(1e-6));
+            // If used != 1.0 set the image scale so the downstream renderer can reuse the
+            // already-parsed `Image` instead of reparsing a scaled SVG string.
+            if (used - 1.0).abs() > f32::EPSILON {
+                img = img.with_scale(crate::Scale::new(used, used));
+            }
+            return (used, Some(img));
+        }
+
+        // Fallback: if parsing failed, try parsing the scaled markup as a last resort
+        let scaled_markup = apply_scale_to_svg(svg, candidate_scale);
+        let preprocessed = strip_slice_class_from_path_tags(&scaled_markup);
+        let sanitized = sanitize_svg_for_printpdf(&preprocessed);
+        if let Ok(mut img) = crate::elements::Image::from_svg_string(&sanitized) {
+            let intrinsic = img.get_intrinsic_size();
+            let allowed_w = 0.9 * page_size.width.as_f32();
+            let allowed_h = 0.9 * page_size.height.as_f32();
+            if intrinsic.width.as_f32() <= 0.0 || intrinsic.height.as_f32() <= 0.0 {
+                return (candidate_scale, None);
+            }
+            let scale_w = allowed_w / intrinsic.width.as_f32();
+            let scale_h = allowed_h / intrinsic.height.as_f32();
+            let max_scale = scale_w.min(scale_h);
+            let used = candidate_scale.min(max_scale.max(1e-6));
+            if (used - 1.0).abs() > f32::EPSILON {
+                img = img.with_scale(crate::Scale::new(used, used));
+            }
+            return (used, Some(img));
+        }
+
+        // If all attempts fail, return the original candidate (best-effort)
+        (candidate_scale, None)
+    }
+
     /// Temporary workaround for a printpdf parsing bug: remove `class="pieCircle"` when
     /// it appears inside `<path ...>` tags only.
     ///
@@ -299,27 +446,33 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
                 Err(e) => return Err(e),
             };
 
-            // Create an Image from the SVG bytes and delegate rendering to it so we reuse all
-            // existing positioning, scaling and link behavior. Apply a light sanitizer to fix
-            // common HTML-in-XML problems (notably bare <br> tags) before parsing.
-            fn sanitize_svg_for_printpdf(s: &str) -> String {
-                // Many HTML-producing tools emit variants of <br> that are not strictly valid
-                // XML (e.g., `<br>` or `<BR >`). Some SVG parsers used by downstream libs
-                // expect well-formed XML, so normalize these variants to `<br/>` to improve
-                // compatibility and avoid parse errors.
-                s.replace("<br />", "<br/>")
-                    .replace("<br >", "<br/>")
-                    .replace("<BR />", "<br/>")
-                    .replace("<BR >", "<br/>")
-                    .replace("<br>", "<br/>")
-                    .replace("<BR>", "<br/>")
+
+            // If auto-scaling is enabled we request the computed scale and allow
+            // the helper to return an already-parsed `Image` to avoid double-parsing.
+            let (used_scale, maybe_img) = if self.auto_scale {
+                let page_size = area.size();
+                compute_auto_scale(&svg, self.scale, page_size)
+            } else {
+                (self.scale, None)
+            };
+
+            if let Some(mut parsed_img) = maybe_img {
+                // Reuse the already-parsed image and render it directly (fast path)
+                parsed_img = parsed_img.with_alignment(self.alignment);
+                if let Some(pos) = self.position {
+                    parsed_img = parsed_img.with_position(pos);
+                }
+                if let Some(link) = &self.link {
+                    parsed_img = parsed_img.with_link(link.clone());
+                }
+                return parsed_img.render(context, area, style);
             }
 
-            // Apply an optional SVG-scale transform before sanitizing and parsing.
-            let scaled_svg = if self.scale != 1.0 {
-                apply_scale_to_svg(&svg, self.scale)
-            } else {
+            // Otherwise construct a (possibly scaled) SVG string and parse it as before.
+            let scaled_svg = if (used_scale - 1.0).abs() < f32::EPSILON {
                 svg.clone()
+            } else {
+                apply_scale_to_svg(&svg, used_scale)
             };
 
             // Temporary workaround: some SVGs emitted by Mermaid attach `class` attributes
@@ -410,11 +563,17 @@ pub struct Mermaid {
     /// Scaling factor applied directly to the generated SVG. A value of 1.0 means no scaling.
     scale: f32,
 
+    /// If true, automatically reduce the scale so the rendered diagram fits within
+    /// 90% of the page width or height (whichever constrains first). When enabled
+    /// the scale is initially set to 2.0 by `with_auto_scale()` and then adjusted
+    /// at render time based on the available area.
+    auto_scale: bool,
+
     /// Positioning and presentation helpers mirrored from `Image`.
     alignment: Alignment,
     position: Option<Position>,
     link: Option<String>,
-}
+} 
 
 #[cfg(feature = "mermaid")]
 impl Mermaid {
@@ -423,6 +582,7 @@ impl Mermaid {
         Mermaid {
             diagram: diagram.into(),
             scale: 1.0,
+            auto_scale: false,
             alignment: Alignment::default(),
             position: None,
             link: None,
@@ -462,7 +622,16 @@ impl Mermaid {
         self.scale = s;
         self
     }
-}
+    /// Enable automatic scaling with a sensible default.
+    ///
+    /// This sets the scale to `2.0` and enables automatic adjustment at render time so
+    /// that the final rendered diagram does not exceed 90% of the available page width
+    /// or height. The computed scale will never be larger than the initial value.
+    pub fn with_auto_scale(mut self) -> Self {
+        self.scale = 2.0;
+        self.auto_scale = true;
+        self
+    }}
 
 #[cfg(all(test, feature = "mermaid"))]
 mod tests {
@@ -588,5 +757,36 @@ mod tests {
         assert!(out.contains("<path d=\"M...Z\"/>") );
         assert!(out.contains("class=\"pieCircle\">X</text>") );
         assert!(out.contains("class=\"other\""));
+    }
+
+    #[test]
+    fn compute_auto_scale_reduces_when_exceeding_limits() {
+        // Very large SVG (in px) so initial scale=2.0 would exceed a 200x200mm page
+        let svg = "<svg width=\"3000\" height=\"1000\"><rect /></svg>";
+        let candidate = 2.0f32;
+        let area_size = crate::Size::new(200.0, 200.0);
+        let (used, _maybe_img) = inner::compute_auto_scale(svg, candidate, area_size);
+
+        // Expected: compute from the original intrinsic size (pre-scale) and then
+        // cap the candidate to the maximum allowed scale.
+        let preprocessed = inner::strip_slice_class_from_path_tags(svg);
+        let sanitized = inner::sanitize_svg_for_printpdf(&preprocessed);
+        let img = crate::elements::Image::from_svg_string(&sanitized).expect("parse svg");
+        let intrinsic = img.get_intrinsic_size();
+        let allowed_w = 0.9 * area_size.width.as_f32();
+        let allowed_h = 0.9 * area_size.height.as_f32();
+        let max_scale = (allowed_w / intrinsic.width.as_f32()).min(allowed_h / intrinsic.height.as_f32());
+        let expected = candidate.min(max_scale.max(1e-6));
+        assert!((used - expected).abs() < 1e-3);
+    }
+
+    #[test]
+    fn compute_auto_scale_keeps_candidate_when_not_needed() {
+        // Small SVG so candidate scale of 2.0 doesn't exceed the area
+        let svg = "<svg width=\"100\" height=\"50\"><rect /></svg>";
+        let candidate = 2.0f32;
+        let area_size = crate::Size::new(200.0, 200.0);
+        let (used, _maybe_img) = inner::compute_auto_scale(svg, candidate, area_size);
+        assert!((used - candidate).abs() < 1e-6);
     }
 }

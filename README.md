@@ -21,6 +21,7 @@ Highlights
 - Robust text serialization for embedded fonts: strings are emitted as full text so PDF viewers apply native kerning and text extractors can recover readable text (prevents glyph-id remapping issues when subsetting).
 - Optional `images` feature to embed common image formats (PNG, JPEG, etc.).
 - Optional `latex` feature to render LaTeX formulas to SVG using `microtex_rs` and embed them as images.
+- Optional `mermaid` feature to render Mermaid diagrams to SVG using a headless Chrome instance and embed them as images.
 - Executable doc examples (no `no_run`/`ignore`) to improve documentation quality.
 - CI workflow that runs tests, generates Cobertura coverage (via tarpaulin) and publishes rustdoc to GitHub Pages.
 
@@ -72,6 +73,12 @@ Enable `images` to test and use image support:
 cargo test --features images
 cargo doc --features images --no-deps
 ```
+
+Mermaid / Headless Chrome
+-------------------------
+
+When using the `mermaid` feature, diagrams are rendered by a headless Chromium instance via the `headless_chrome` crate.
+On first execution the crate may download a Chromium binary automatically; this can make the very first run noticeably longer and requires network access. If you prefer to avoid the download, install Chrome/Chromium system-wide and ensure it is available in PATH before running Mermaid examples.
 
 Contributing
 ------------
