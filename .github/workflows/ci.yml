@@ -34,7 +34,6 @@ jobs:
           CARGO_HOME: ${{ runner.temp }}/cargo_home
 
       - name: Clean runner for space (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
         uses: sctg-development/clean-image-for-docker@v2
         # Optional parameters
         with:
