@@ -278,7 +278,7 @@ gitGraph
             let mer = elements::Mermaid::new(*diagram).with_alignment(Alignment::Center);
             doc.push(mer);
             // Use automatic scaling rather than a fixed scale
-            let mer = elements::Mermaid::new(*diagram).with_alignment(Alignment::Center).with_auto_scale();
+            let mer = elements::Mermaid::new(*diagram).with_alignment(Alignment::Center).with_auto_scale(2.0, 0.9);
             doc.push(mer);
             println!("✓ Diagram {} queued for rendering", idx + 1);
             success_count += 1;

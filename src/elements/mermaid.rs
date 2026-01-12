@@ -1,10 +1,10 @@
-//! Mermaid diagram element
+//! Mermaid diagram element.
 //!
-//! This element renders a Mermaid diagram by invoking a headless Chrome instance that executes
-//! the Mermaid JS runtime embedded in the crate's `examples/helper` files and returns an SVG.
-//! The resulting SVG is embedded into the PDF using the existing `Image` element.
-//!
-//! This element is only available when the `mermaid` feature is enabled.
+//! Renders Mermaid diagrams to SVG by executing the embedded Mermaid runtime inside a
+//! headless Chrome instance. The produced SVG is embedded into the PDF using the
+//! existing `Image` element. Note that rendering requires the `mermaid` feature and a
+//! working headless Chrome executable available at runtime. Doc examples demonstrate
+//! API usage but do not perform rendering to avoid requiring Chrome in doctests.
 
 #[cfg(feature = "mermaid")]
 use crate::{Alignment, Position, Size};
@@ -318,13 +318,13 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
     }
 
     /// Given an SVG and a candidate scale, determine the final scale so that the
-    /// rendered image does not exceed 90% of the provided page width/height. The
+    /// rendered image does not exceed the specified maximum ratio of the provided page width/height. The
     /// function returns a scale that is at most `candidate_scale`.
     ///
     /// This implementation prefers a fast string-based extraction of `width`/`height`
     /// or `viewBox` to avoid invoking the slow SVG parser on every diagram. Only if
     /// these heuristics fail do we fall back to a full parse.
-    pub(crate) fn compute_auto_scale(svg: &str, candidate_scale: f32, page_size: Size) -> (f32, Option<crate::elements::Image>) {
+    pub(crate) fn compute_auto_scale(svg: &str, candidate_scale: f32, max_ratio: f32, page_size: Size) -> (f32, Option<crate::elements::Image>) {
         // Fast path: extract width/height in pixels from attributes or viewBox
         if let Some((w_px, h_px)) = extract_svg_intrinsic_px(svg) {
             // Determine DPI (default 300 if not present)
@@ -332,8 +332,8 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
             let mmpi: f32 = 25.4; // mm per inch
             let intrinsic_w_mm = mmpi * (w_px / dpi);
             let intrinsic_h_mm = mmpi * (h_px / dpi);
-            let allowed_w = 0.9 * page_size.width.as_f32();
-            let allowed_h = 0.9 * page_size.height.as_f32();
+            let allowed_w = max_ratio * page_size.width.as_f32();
+            let allowed_h = max_ratio * page_size.height.as_f32();
             if intrinsic_w_mm <= 0.0 || intrinsic_h_mm <= 0.0 {
                 return (candidate_scale, None);
             }
@@ -348,8 +348,8 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
         let sanitized = sanitize_svg_for_printpdf(&preprocessed);
         if let Ok(mut img) = crate::elements::Image::from_svg_string(&sanitized) {
             let intrinsic = img.get_intrinsic_size();
-            let allowed_w = 0.9 * page_size.width.as_f32();
-            let allowed_h = 0.9 * page_size.height.as_f32();
+            let allowed_w = max_ratio * page_size.width.as_f32();
+            let allowed_h = max_ratio * page_size.height.as_f32();
             if intrinsic.width.as_f32() <= 0.0 || intrinsic.height.as_f32() <= 0.0 {
                 return (candidate_scale, None);
             }
@@ -451,7 +451,7 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
             // the helper to return an already-parsed `Image` to avoid double-parsing.
             let (used_scale, maybe_img) = if self.auto_scale {
                 let page_size = area.size();
-                compute_auto_scale(&svg, self.scale, page_size)
+                compute_auto_scale(&svg, self.scale, self.max_ratio, page_size)
             } else {
                 (self.scale, None)
             };
@@ -539,9 +539,11 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
     }
 }
 
-/// An element that renders a Mermaid diagram into the PDF as an SVG image.
+/// Element that renders a Mermaid diagram into the PDF as an SVG image.
 ///
 /// This element is only available when the `mermaid` feature is enabled.
+/// Rendering requires headless Chrome at runtime; the following example demonstrates
+/// creating and configuring a `Mermaid` element but does not attempt to render it.
 ///
 /// # Examples
 ///
@@ -550,9 +552,14 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
 /// # {
 /// use genpdfi_extended::elements::Mermaid;
 /// use genpdfi_extended::Alignment;
-/// let mut m = Mermaid::new("graph TB\na-->b");
-/// m = m.with_alignment(Alignment::Center);
-/// // Add `m` to a document to render it in a PDF
+///
+/// let m = Mermaid::new("graph TB\na-->b")
+///     .with_alignment(Alignment::Center)
+///     .with_scale(1.5);
+///
+/// // Example verifies the API compiles and can be debug-formatted without invoking Chrome.
+/// let s = format!("{:?}", m);
+/// assert!(s.contains("Mermaid"));
 /// # }
 /// ```
 #[cfg(feature = "mermaid")]
@@ -569,6 +576,9 @@ pub struct Mermaid {
     /// at render time based on the available area.
     auto_scale: bool,
 
+    /// Maximum ratio of page size to use when auto-scaling (e.g. 0.9 for 90% of page)
+    max_ratio: f32,
+
     /// Positioning and presentation helpers mirrored from `Image`.
     alignment: Alignment,
     position: Option<Position>,
@@ -578,10 +588,23 @@ pub struct Mermaid {
 #[cfg(feature = "mermaid")]
 impl Mermaid {
     /// Create a new Mermaid element from the source string.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mermaid")]
+    /// # {
+    /// use genpdfi_extended::elements::Mermaid;
+    /// let m = Mermaid::new("graph TB\na-->b");
+    /// let s = format!("{:?}", m);
+    /// assert!(s.contains("Mermaid"));
+    /// # }
+    /// ```
     pub fn new<S: Into<String>>(diagram: S) -> Self {
         Mermaid {
             diagram: diagram.into(),
             scale: 1.0,
+            max_ratio: 0.9,
             auto_scale: false,
             alignment: Alignment::default(),
             position: None,
@@ -618,17 +641,42 @@ impl Mermaid {
     ///
     /// The scaling is applied to the SVG markup (a wrapper `<g transform="scale(...)">`
     /// is inserted) and numeric `width`/`height` attributes are multiplied accordingly.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mermaid")]
+    /// # {
+    /// use genpdfi_extended::elements::Mermaid;
+    /// let m = Mermaid::new("graph TB\na-->b").with_scale(2.0);
+    /// let s = format!("{:?}", m);
+    /// assert!(s.contains("Mermaid"));
+    /// # }
+    /// ```
     pub fn with_scale(mut self, s: f32) -> Self {
         self.scale = s;
         self
     }
     /// Enable automatic scaling with a sensible default.
     ///
-    /// This sets the scale to `2.0` and enables automatic adjustment at render time so
+    /// This sets the scale and enables automatic adjustment at render time so
     /// that the final rendered diagram does not exceed 90% of the available page width
     /// or height. The computed scale will never be larger than the initial value.
-    pub fn with_auto_scale(mut self) -> Self {
-        self.scale = 2.0;
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # #[cfg(feature = "mermaid")]
+    /// # {
+    /// use genpdfi_extended::elements::Mermaid;
+    /// let m = Mermaid::new("graph TB\na-->b").with_auto_scale(2.0, 0.9);
+    /// let s = format!("{:?}", m);
+    /// assert!(s.contains("Mermaid"));
+    /// # }
+    /// ```
+    pub fn with_auto_scale(mut self, s: f32, max_ratio: f32) -> Self {
+        self.scale = s;
+        self.max_ratio = max_ratio;
         self.auto_scale = true;
         self
     }}
@@ -765,7 +813,7 @@ mod tests {
         let svg = "<svg width=\"3000\" height=\"1000\"><rect /></svg>";
         let candidate = 2.0f32;
         let area_size = crate::Size::new(200.0, 200.0);
-        let (used, _maybe_img) = inner::compute_auto_scale(svg, candidate, area_size);
+        let (used, _maybe_img) = inner::compute_auto_scale(svg, candidate, 0.9, area_size);
 
         // Expected: compute from the original intrinsic size (pre-scale) and then
         // cap the candidate to the maximum allowed scale.
@@ -786,7 +834,7 @@ mod tests {
         let svg = "<svg width=\"100\" height=\"50\"><rect /></svg>";
         let candidate = 2.0f32;
         let area_size = crate::Size::new(200.0, 200.0);
-        let (used, _maybe_img) = inner::compute_auto_scale(svg, candidate, area_size);
+        let (used, _maybe_img) = inner::compute_auto_scale(svg, candidate, 0.9, area_size);
         assert!((used - candidate).abs() < 1e-6);
     }
 }
