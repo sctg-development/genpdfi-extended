@@ -243,6 +243,53 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
         svg.to_string()
     }
 
+    /// Temporary workaround for a printpdf parsing bug: remove `class="pieCircle"` when
+    /// it appears inside `<path ...>` tags only.
+    ///
+    /// Some SVGs produced by Mermaid attach `class="pieCircle"` (or single-quoted variants)
+    /// to `<path>` elements representing chart slices. The `printpdf`/`lopdf` parser
+    /// can convert certain SVG constructs into PDF XObjects with an incorrect structure
+    /// (a Stream where a Dictionary is expected), which leads to parsing errors such as
+    /// "Invalid dictionary reference" and missing fills in the final PDF.
+    ///
+    /// This helper performs a minimal, local string transformation to remove the
+    /// `class="pieCircle"` attribute only for `<path>` tags. It is intentionally small
+    /// and conservative to avoid affecting unrelated elements. This function is a
+    /// temporary workaround and should be removed when `printpdf` fixes the root cause.
+    pub(crate) fn strip_slice_class_from_path_tags(s: &str) -> String {
+        let mut out = String::with_capacity(s.len());
+        let mut i = 0usize;
+        while let Some(start) = s[i..].find("<path") {
+            let abs_start = i + start;
+            // copy up to start
+            out.push_str(&s[i..abs_start]);
+            // find end of tag
+            if let Some(tag_end_rel) = s[abs_start..].find('>') {
+                let tag_end = abs_start + tag_end_rel + 1; // include '>'
+                let mut tag = s[abs_start..tag_end].to_string();
+                // remove occurrences of class="pieCircle" or class='pieCircle' inside the tag
+                // only remove the attribute token, leave other attributes intact
+                tag = tag.replace(" class=\"pieCircle\"", "");
+                tag = tag.replace(" class='pieCircle'", "");
+                // Also handle cases where class="pieCircle" may not have a leading space
+                tag = tag.replace("class=\"pieCircle\" ", "");
+                tag = tag.replace("class='pieCircle' ", "");
+                out.push_str(&tag);
+                i = tag_end;
+                continue;
+            } else {
+                // malformed tag; copy remainder and break
+                out.push_str(&s[abs_start..]);
+                i = s.len();
+                break;
+            }
+        }
+        if i < s.len() {
+            out.push_str(&s[i..]);
+        }
+        out
+    }
+
     impl Element for Mermaid {
         fn render(&mut self, context: &Context, area: render::Area<'_>, style: Style) -> Result<RenderResult, Error> {
             // Render diagram either as SVG or PNG (raster fallback)
@@ -274,7 +321,15 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
             } else {
                 svg.clone()
             };
-            let sanitized = sanitize_svg_for_printpdf(&scaled_svg);
+
+            // Temporary workaround: some SVGs emitted by Mermaid attach `class` attributes
+            // to arc `<path>` elements (e.g. `class="slice"`) which can cause the
+            // PDF SVG parser to generate malformed XObjects resulting in render issues
+            // (see project issue TODO: replace with real issue link). Strip only
+            // `class="slice"` attributes when they appear inside `<path>` tags.
+            // This should be removed once the upstream parser handles these cases.
+            let preprocessed = strip_slice_class_from_path_tags(&scaled_svg);
+            let sanitized = sanitize_svg_for_printpdf(&preprocessed);
 
             // Prefer the sanitized SVG; if that fails, try the original raw SVG so we don't hide
             // surprising parsing behavior. If both fail and debugging is enabled, dump raw SVG.
@@ -282,7 +337,7 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
                 Ok(mut img) => {
                     if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
                         eprintln!("--- BEGIN MERMAID SOURCE ---\n{}--- END MERMAID SOURCE ---", self.diagram);
-                        eprintln!("--- BEGIN MERMAID SVG ---\n{}\n--- END MERMAID SVG ---", sanitized);
+                        eprintln!("--- BEGIN MERMAID SANITIZED SVG ---\n{}\n--- END MERMAID SANITIZED SVG ---", sanitized);
                     }
                     img = img.with_alignment(self.alignment);
                     if let Some(pos) = self.position {
@@ -523,5 +578,15 @@ mod tests {
         let got2 = inner::apply_scale_to_svg(input2, 1.5);
         assert!(got2.contains("width=\"150px\""));
         assert!(got2.contains("height=\"75px\""));
+    }
+
+    #[test]
+    fn strip_slice_class_from_paths_works() {
+        let input = "<svg><path class=\"pieCircle\" d=\"M...Z\"/><path class=\"other\" d=\"M...Z\"/><text class=\"pieCircle\">X</text></svg>";
+        // The class on the path should be removed but the text's class should remain
+        let out = inner::strip_slice_class_from_path_tags(input);
+        assert!(out.contains("<path d=\"M...Z\"/>") );
+        assert!(out.contains("class=\"pieCircle\">X</text>") );
+        assert!(out.contains("class=\"other\""));
     }
 }
