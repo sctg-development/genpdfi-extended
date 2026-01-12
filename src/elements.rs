@@ -43,6 +43,9 @@ mod images;
 #[cfg(feature = "latex")]
 mod latex;
 
+#[cfg(feature = "mermaid")]
+mod mermaid;
+
 use std::collections;
 use std::iter;
 use std::mem;
@@ -60,6 +63,9 @@ pub use images::Image;
 
 #[cfg(feature = "latex")]
 pub use latex::Latex;
+
+#[cfg(feature = "mermaid")]
+pub use mermaid::Mermaid;
 
 /// Helper trait for creating boxed elements.
 pub trait IntoBoxedElement {

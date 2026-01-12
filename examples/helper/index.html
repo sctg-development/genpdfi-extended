@@ -1,3 +1,18 @@
 <!DOCTYPE html>
 <div id="div"></div>
-<script>window.render = async (x) => (await mermaid.render('div', x)).svg</script>
+<script>
+  // Render helper used by the Rust example. Returns the SVG string on success.
+  // On failure it returns a JSON object with an `error` property so the caller can
+  // report a meaningful diagnostic instead of just `null`.
+  window.render = async (x) => {
+    try {
+      mermaid.initialize({ htmlLabels: false });
+      const result = await mermaid.render('div', x);
+      return result.svg;
+    } catch (e) {
+      return JSON.stringify({ error: String(e) });
+    }
+  }
+
+
+</script>

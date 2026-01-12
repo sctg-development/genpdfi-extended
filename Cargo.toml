@@ -21,6 +21,7 @@ readme = "README.md"
 
 [dependencies]
 lopdf = "0.38.0"
+once_cell = "1.20.0"
 rusttype = "0.9.3"
 subsetter = "0.2.3"
 ttf-parser = "0.25.1"
@@ -85,7 +86,7 @@ images = [
     "image/tiff",
 ]
 latex = ["microtex_rs"]
-mermaid = ["headless_chrome", "escape_string", "unescape"]
+mermaid = ["headless_chrome", "escape_string", "unescape", "images"]
 
 [package.metadata.docs.rs]
 all-features = true

@@ -1294,6 +1294,7 @@ dependencies = [
  "image",
  "lopdf 0.38.0",
  "microtex_rs",
+ "once_cell",
  "predicates",
  "printpdf",
  "rusttype",
