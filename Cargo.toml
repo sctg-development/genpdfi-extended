@@ -60,6 +60,19 @@ tempfile = "3"
 assert_cmd = "2"
 predicates = "3.1.3"
 
+[dependencies.escape_string]
+version = "0.1.2"
+optional = true
+
+[dependencies.headless_chrome]
+version = "1.0.20"
+optional = true
+features = ["fetch"]
+
+[dependencies.unescape]
+optional = true
+version = "0.1.0"
+
 [features]
 default = ["images"]
 images = [
@@ -72,6 +85,7 @@ images = [
     "image/tiff",
 ]
 latex = ["microtex_rs"]
+mermaid = ["headless_chrome", "escape_string", "unescape"]
 
 [package.metadata.docs.rs]
 all-features = true
