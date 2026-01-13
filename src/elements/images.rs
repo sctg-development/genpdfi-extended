@@ -718,28 +718,46 @@ impl Element for Image {
         let true_size = self.size_with_scale(effective_scale);
         let (bb_origin, bb_size) = bounding_box_offset_and_size(&self.rotation, &true_size);
 
-        let mut position: Position = if let Some(position) = self.position {
-            position
+        // Compute two different positions:
+        // * `top_left` is the logical top-left corner of the image's bounding box (used for
+        //   overflow checks and annotations)
+        // * `render_position` is the adjusted position passed to add_svg/add_image. The
+        //   rendering API places the XObject's *lower-left* corner at the given position in
+        //   user space, so we must shift by the bounding-box height so that the image's top
+        //   aligns as expected.
+        let top_left: Position;
+        let mut render_position: Position;
+
+        if let Some(p) = self.position {
+            // User provided an absolute position — treat it as the *top-left* of the image
+            // bounding box (logical position). The position to pass to add_svg/add_image must
+            // place the lower-left of the XObject accordingly (top_left.y + bb_size.height).
+            top_left = p;
+            render_position = Position::new(p.x, p.y + bb_size.height);
         } else {
+            // No position override given; calculate the Alignment offset based on the
+            // area-size and width of the bounding box, and place the image at the top
+            // (y=0) of the available area (alignment only affects horizontal offset).
+            let offset = self.get_offset(bb_size.width, area.size().width);
+            top_left = Position::new(offset.x, Mm::from(0.0));
+            render_position = Position::new(offset.x, bb_size.height);
+
             // Update the result size to be based on the bounding-box size/offset.
             result.size = bb_size;
-
-            // No position override given; so we calculate the Alignment offset based on
-            // the area-size and width of the bounding box.
-            self.get_offset(bb_size.width, area.size().width)
-        };
-
-        // Fix the position with the bounding-box's origin which was changed from
-        // (0,0) when it was rotated in any way.
-        position += bb_origin;
+        }
 
         // CHECK FOR OVERFLOW BEFORE RENDERING
         // If the image (with bounding box) doesn't fit in the available area,
         // don't render it and signal that we need more space (new page).
-        let image_bottom = position.y + bb_size.height;
+        let image_bottom = top_left.y + bb_size.height;
         let available_height = area.size().height;
 
         if image_bottom > available_height {
+            // Debug info when an image doesn't fit
+            if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
+                eprintln!("Image overflow: effective_scale={:?} true_size={:?} bb_size={:?} top_left={:?} render_position={:?} image_bottom={:.1} available_height={:.1}",
+                    effective_scale, true_size, bb_size, top_left, render_position, image_bottom.as_f32(), available_height.as_f32());
+            }
             // Image overflows the page - don't render it and signal that we need more space
             result.has_more = true;
             result.size = Size::new(0, 0); // Don't consume space
@@ -750,7 +768,7 @@ impl Element for Image {
         match &self.source {
             ImageSource::Svg(svg) => {
                 // SVG rendering - no alpha compositing needed, printpdf handles it
-                area.add_svg(svg, position, effective_scale, self.rotation);
+                area.add_svg(svg, render_position, effective_scale, self.rotation);
             }
             ImageSource::Raster(raster) => {
                 // Raster rendering - handle alpha channel if present
@@ -794,20 +812,20 @@ impl Element for Image {
                     let composite = image::DynamicImage::ImageRgb8(rgb);
                     area.add_image(
                         &composite,
-                        position,
+                        render_position,
                         effective_scale,
                         self.rotation,
                         self.dpi,
                     );
                 } else {
-                    area.add_image(raster, position, effective_scale, self.rotation, self.dpi);
+                    area.add_image(raster, render_position, effective_scale, self.rotation, self.dpi);
                 }
             }
         }
 
         // Add link annotation after image is rendered (for both raster and SVG)
         if let Some(url) = &self.link {
-            area.add_image_link(position, true_size, self.rotation, url);
+            area.add_image_link(top_left, true_size, self.rotation, url);
         }
 
         // Image fits and was successfully rendered

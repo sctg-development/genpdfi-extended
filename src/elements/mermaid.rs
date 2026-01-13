@@ -335,12 +335,20 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
             let allowed_w = max_ratio * page_size.width.as_f32();
             let allowed_h = max_ratio * page_size.height.as_f32();
             if intrinsic_w_mm <= 0.0 || intrinsic_h_mm <= 0.0 {
+                if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
+                    eprintln!("compute_auto_scale: invalid intrinsic dims w_mm={} h_mm={}", intrinsic_w_mm, intrinsic_h_mm);
+                }
                 return (candidate_scale, None);
             }
             let req_w = allowed_w / intrinsic_w_mm;
             let req_h = allowed_h / intrinsic_h_mm;
             let required_scale = req_w.min(req_h);
-            return (candidate_scale.min(required_scale.max(1e-6)), None);
+            let used = candidate_scale.min(required_scale.max(1e-6));
+            if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
+                eprintln!("compute_auto_scale: fast path w_px={} h_px={} dpi={} intrinsic_mm=({}, {}) allowed_mm=({}, {}) req=(w:{} h:{}) candidate={} used={}",
+                    w_px, h_px, dpi, intrinsic_w_mm, intrinsic_h_mm, allowed_w, allowed_h, req_w, req_h, candidate_scale, used);
+            }
+            return (used, None);
         }
 
         // Slow path: try parsing the unscaled SVG to get accurate intrinsic size
@@ -359,6 +367,11 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
             let used = candidate_scale.min(required_scale.max(1e-6));
             // If used != 1.0 set the image scale so the downstream renderer can reuse the
             // already-parsed `Image` instead of reparsing a scaled SVG string.
+            if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
+                let intrinsic = img.get_intrinsic_size();
+                eprintln!("compute_auto_scale: slow path intrinsic=({}, {}) candidate={} required={} used={}",
+                    intrinsic.width.as_f32(), intrinsic.height.as_f32(), candidate_scale, required_scale, used);
+            }
             if (used - 1.0).abs() > f32::EPSILON {
                 img = img.with_scale(crate::Scale::new(used, used));
             }
