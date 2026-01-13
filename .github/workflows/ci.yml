@@ -38,7 +38,7 @@ jobs:
         # Optional parameters
         with:
           remove-development-tools: "false"
-          remove-browsers: "true"
+          remove-browsers: "false"
           remove-android: "true"
           remove-databases: "true"
           remove-cloud-tools: "true"
