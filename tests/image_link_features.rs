@@ -1,3 +1,8 @@
+// Copyright (c) 2026 Ronan Le Meillat - SCTG Development
+// 
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Licensed under the MIT License or the Apache License, Version 2.0
+
 //! Tests for image linking and scaling features in genpdfi_extended.
 //!
 //! This module validates:

@@ -1,3 +1,8 @@
+# Copyright (c) 2026 Ronan Le Meillat - SCTG Development
+# 
+# SPDX-License-Identifier: MIT OR Apache-2.0
+# Licensed under the MIT License or the Apache License, Version 2.0
+
 #!/usr/bin/env python3
 """Validate PDF appearance using PyMuPDF (fitz) and Pillow.
 

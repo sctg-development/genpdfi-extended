@@ -1,3 +1,8 @@
+// Copyright (c) 2026 Ronan Le Meillat - SCTG Development
+// 
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Licensed under the MIT License or the Apache License, Version 2.0
+
 //! Stress Test: Many LaTeX Formulas in One Document
 //!
 //! This example stress-tests the LaTeX feature with multiple formulas

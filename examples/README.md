@@ -1,3 +1,10 @@
+<!--
+Copyright (c) 2026 Ronan Le Meillat - SCTG Development
+SPDX-License-Identifier: MIT OR Apache-2.0
+Licensed under the MIT License or the Apache License, Version 2.0
+
+-->
+
 This directory contains runnable examples that reproduce the PDFs generated in the integration tests.
 
 Examples:

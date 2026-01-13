@@ -1,3 +1,8 @@
+// Copyright (c) 2026 Ronan Le Meillat - SCTG Development
+// 
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Licensed under the MIT License or the Apache License, Version 2.0
+
 // This example uses the `images` feature. It is safe to compile without that
 // feature enabled because `main` will early-exit when the feature is not active.
 

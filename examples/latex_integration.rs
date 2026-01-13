@@ -1,3 +1,8 @@
+// Copyright (c) 2026 Ronan Le Meillat - SCTG Development
+// 
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Licensed under the MIT License or the Apache License, Version 2.0
+
 //! Example: LaTeX Formulas Integration with genpdfi_extended
 //!
 //! This example demonstrates how to use the new `Latex` element to render

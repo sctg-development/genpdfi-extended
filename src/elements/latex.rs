@@ -1,3 +1,8 @@
+// Copyright (c) 2026 Ronan Le Meillat - SCTG Development
+// 
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Licensed under the MIT License or the Apache License, Version 2.0
+
 //! LaTeX formula support for genpdfi-rs.
 //!
 //! This module provides the `Latex` element which allows rendering LaTeX formulas

@@ -1,3 +1,9 @@
+// Copyright (c) 2025 Ismael Theiskaa
+// Copyright (c) 2026 Ronan Le Meillat - SCTG Development
+// 
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Licensed under the MIT License or the Apache License, Version 2.0
+
 //! User-friendly PDF generator written in pure Rust.
 //!
 //! `genpdfi` is a high-level PDF generator built ontop of [`printpdf`][] and [`rusttype`][].  It

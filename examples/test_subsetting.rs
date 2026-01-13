@@ -1,3 +1,9 @@
+// Copyright (c) 2025 Ismael Theiskaa
+// Copyright (c) 2026 Ronan Le Meillat - SCTG Development
+// 
+// SPDX-License-Identifier: MIT OR Apache-2.0
+// Licensed under the MIT License or the Apache License, Version 2.0
+
 //! Test example for font subsetting functionality
 
 use genpdfi_extended::subsetting::subset_font;
