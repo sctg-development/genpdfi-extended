@@ -1,0 +1,5 @@
+{
+  "rust-analyzer.cargo.noDefaultFeatures": false,
+  "rust-analyzer.cargo.features": ["mermaid","latex","images"],
+  "rust-analyzer.procMacro.enable": true
+}
