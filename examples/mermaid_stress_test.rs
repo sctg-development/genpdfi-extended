@@ -12,6 +12,7 @@
 
 use std::fs;
 use std::path::PathBuf;
+use std::time::Instant;
 
 use genpdfi_extended::{elements, fonts, style, Alignment, Document};
 
@@ -27,12 +28,19 @@ fn main() {
         // Quick runtime check: ensure headless Chrome is available before building the PDF.
         // This avoids a long error during PDF generation on systems without Chrome. We use the
         // shared singleton so the example also warms up the global browser instance.
-        match elements::Mermaid::ensure_browser() {
-            Ok(_) => println!("Headless Chrome appears usable; proceeding with Mermaid stress test..."),
-            Err(e) => {
-                eprintln!("Headless Chrome is not available or failed to start: {}", e);
-                eprintln!("Install Chrome / Chromium and ensure it's runnable in headless mode to run this example.");
-                return;
+        {
+            let browser_start = Instant::now();
+            match elements::Mermaid::ensure_browser() {
+                Ok(_) => {
+                    let dur = browser_start.elapsed();
+                    println!("Headless Chrome appears usable; proceeding with Mermaid stress test... (startup {:.3?})", dur);
+                }
+                Err(e) => {
+                    let dur = browser_start.elapsed();
+                    eprintln!("Headless Chrome is not available or failed to start after {:.3?}: {}", dur, e);
+                    eprintln!("Install Chrome / Chromium and ensure it's runnable in headless mode to run this example.");
+                    return;
+                }
             }
         }
 
@@ -215,6 +223,8 @@ gitGraph
 "#),
         ];
 
+        let queue_start = Instant::now();
+
         let mut success_count = 0usize;
 
         for (idx, (title, diagram)) in diagrams.iter().enumerate() {
@@ -237,6 +247,8 @@ gitGraph
             success_count += 1;
         }
 
+        eprintln!("Queued {} diagrams in {:.3?}", success_count, queue_start.elapsed());
+
         // Summary
         doc.push(elements::Paragraph::new(""));
         doc.push(elements::Paragraph::new("").styled_string(
@@ -247,8 +259,12 @@ gitGraph
 
         // Output document
         let output_path = out_dir.join("mermaid_stress_test.pdf");
+        let render_start = Instant::now();
         doc.render_to_file(&output_path)
             .expect("Failed to render PDF with Mermaid diagrams");
+        let render_dur = render_start.elapsed();
+        let avg_secs = render_dur.as_secs_f64() / success_count as f64;
+        eprintln!("Rendered {} diagrams in {:.3?} (avg {:.3}s/diagram)", success_count, render_dur, avg_secs);
 
         println!();
         println!("{}", "=".repeat(70));

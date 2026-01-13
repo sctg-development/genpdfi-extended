@@ -682,6 +682,7 @@ flowchart LR
 fn render_each_mermaid_block_to_pdf() {
     use std::fs;
     use std::path::PathBuf;
+    use std::time::Instant;
 
     use genpdfi_extended::{elements, fonts, style, Alignment, Document};
 
@@ -704,6 +705,8 @@ fn render_each_mermaid_block_to_pdf() {
         bold_italic: fd.clone(),
     };
 
+    let test_start = Instant::now();
+
     // Render each Mermaid block to its own PDF
     for (i, mermaid_block) in MERMAID_BLOCKS.iter().enumerate() {
         let mut doc = Document::new(family.clone());
@@ -722,9 +725,17 @@ fn render_each_mermaid_block_to_pdf() {
 
         let output_path = out_dir.join(format!("mermaid_diagram_{}.pdf", i + 1));
         eprintln!("Rendering diagram {} -> {}", i + 1, output_path.display());
+        let render_start = Instant::now();
         match doc.render_to_file(output_path) {
-            Ok(()) => {}
-            Err(e) => panic!("Failed to render diagram {}: {:?}", i + 1, e),
+            Ok(()) => {
+                let render_dur = render_start.elapsed();
+                eprintln!("Rendered diagram {} in {:.3?} (render)", i + 1, render_dur);
+            }
+            Err(e) => {
+                let render_elapsed = render_start.elapsed();
+                eprintln!("Failed to render diagram {} after {:.3?}: {:?}", i + 1, render_elapsed, e);
+                panic!("Failed to render diagram {}: {:?}", i + 1, e);
+            }
         }
     }
     // Check if all files were created
@@ -837,4 +848,6 @@ fn render_each_mermaid_block_to_pdf() {
 
         assert_images_within_page(&output_path);
     }
+
+    eprintln!("Total mermaid test time: {:.3?}", test_start.elapsed());
 }
