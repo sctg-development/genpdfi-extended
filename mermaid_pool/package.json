@@ -14,11 +14,12 @@
     "mermaid": "^11.12.2"
   },
   "devDependencies": {
+    "@types/node": "^25.0.8",
+    "jsdom": "^27.4.0",
     "typescript": "5.9.3",
     "vite": "7.3.1",
     "vite-plugin-singlefile": "2.3.0",
-    "vitest": "^1.2.2",
-    "jsdom": "^22.1.0"
+    "vitest": "^4.0.17"
   },
   "vitest": {
     "environment": "jsdom",
