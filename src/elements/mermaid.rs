@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Ronan Le Meillat - SCTG Development
-// 
+//
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Licensed under the MIT License or the Apache License, Version 2.0
 
@@ -25,7 +25,7 @@ mod inner {
     use crate::error::{Context as _, Error, ErrorKind};
     use crate::render;
     use crate::style::Style;
-    use crate::{Alignment, Context, Element, RenderResult, Size, Position};
+    use crate::{Alignment, Context, Element, Position, RenderResult, Size};
 
     use super::Mermaid;
 
@@ -42,11 +42,11 @@ mod inner {
 
     use once_cell::sync::OnceCell;
 
-// Shared headless Chrome instance used across Mermaid renders.
-// Lazily initialized with OnceCell to avoid spawning a new browser for every diagram,
-// which would be expensive and slow. Reusing a single Browser improves performance
-// and reduces resource usage.
-static BROWSER: OnceCell<Browser> = OnceCell::new();
+    // Shared headless Chrome instance used across Mermaid renders.
+    // Lazily initialized with OnceCell to avoid spawning a new browser for every diagram,
+    // which would be expensive and slow. Reusing a single Browser improves performance
+    // and reduces resource usage.
+    static BROWSER: OnceCell<Browser> = OnceCell::new();
     /// Initialize or check the shared headless Chrome instance used for Mermaid rendering.
     ///
     /// This will lazily start a Browser on first call and return quickly afterwards.
@@ -55,7 +55,12 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
         // Attempt to initialize the global Browser once. `get_or_try_init` returns a
         // reference if already initialized or runs the closure to create it.
         BROWSER.get_or_try_init(|| {
-            Browser::default().map_err(|e| Error::new(format!("Failed to start headless chrome: {}", e), ErrorKind::Internal))
+            Browser::default().map_err(|e| {
+                Error::new(
+                    format!("Failed to start headless chrome: {}", e),
+                    ErrorKind::Internal,
+                )
+            })
         })?;
         Ok(())
     }
@@ -64,7 +69,12 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
         // Return a reference to the shared Browser, initializing it if necessary.
         // Using a &'static Browser makes it convenient to use across async calls and closures.
         BROWSER.get_or_try_init(|| {
-            Browser::default().map_err(|e| Error::new(format!("Failed to start headless chrome: {}", e), ErrorKind::Internal))
+            Browser::default().map_err(|e| {
+                Error::new(
+                    format!("Failed to start headless chrome: {}", e),
+                    ErrorKind::Internal,
+                )
+            })
         })
     }
 
@@ -84,11 +94,13 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
 
             // Open a new tab and load the embedded helper page via a data URI. Using a data
             // URI keeps the page self-contained and avoids I/O to disk or network.
-            let tab = browser
-                .new_tab()
-                .map_err(|e| Error::new(format!("Failed to open tab: {}", e), ErrorKind::Internal))?;
+            let tab = browser.new_tab().map_err(|e| {
+                Error::new(format!("Failed to open tab: {}", e), ErrorKind::Internal)
+            })?;
             tab.navigate_to(&format!("data:text/html;charset=utf-8,{}", html_payload))
-                .map_err(|e| Error::new(format!("Failed to navigate: {}", e), ErrorKind::Internal))?;
+                .map_err(|e| {
+                    Error::new(format!("Failed to navigate: {}", e), ErrorKind::Internal)
+                })?;
             // Wait for the navigation to finish so that the `render` helper is present on the page.
             tab.wait_until_navigated()
                 .map_err(|e| Error::new(format!("Navigation error: {}", e), ErrorKind::Internal))?;
@@ -96,16 +108,20 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
             // Inject the mermaid runtime into the page so it can compile the diagram string.
             // We pass `false` for the optional await flag because loading the runtime is
             // synchronous for our embedded script.
-            tab.evaluate(mermaid_js, false)
-                .map_err(|e| Error::new(format!("Failed to evaluate mermaid script: {}", e), ErrorKind::Internal))?;
+            tab.evaluate(mermaid_js, false).map_err(|e| {
+                Error::new(
+                    format!("Failed to evaluate mermaid script: {}", e),
+                    ErrorKind::Internal,
+                )
+            })?;
 
             // Call the helper `render` function defined in index.html. We must escape the diagram
             // so that single quotes and other characters don't break the JS call. The helper
             // returns a JSON-encoded string on success or an error object on failure.
             let js_call = format!("render('{}')", escape(diagram));
-            let data = tab
-                .evaluate(&js_call, true)
-                .map_err(|e| Error::new(format!("JS execution error: {}", e), ErrorKind::Internal))?;
+            let data = tab.evaluate(&js_call, true).map_err(|e| {
+                Error::new(format!("JS execution error: {}", e), ErrorKind::Internal)
+            })?;
 
             let raw = data.value.unwrap_or_default().to_string();
             // The returned value is a quoted string; unescape and strip surrounding quotes.
@@ -114,18 +130,24 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
             // Detect whether the helper reported a JS-side error (we return a JSON error object
             // from `examples/helper/index.html` in that case), or whether the result was `null`/empty.
             if svg.trim().starts_with('{') && svg.contains("\"error\"") {
-                return Err(Error::new(format!("Mermaid JS error: {}", svg), ErrorKind::InvalidData));
+                return Err(Error::new(
+                    format!("Mermaid JS error: {}", svg),
+                    ErrorKind::InvalidData,
+                ));
             }
 
             if svg == "null" || svg.trim().is_empty() {
                 // Provide a diagnostic with the raw JS response and a small snippet of the diagram so
                 // users can quickly see what went wrong.
-                let snippet = if diagram.len() > 200 { format!("{}...", &diagram[..200]) } else { diagram.to_string() };
+                let snippet = if diagram.len() > 200 {
+                    format!("{}...", &diagram[..200])
+                } else {
+                    diagram.to_string()
+                };
                 return Err(Error::new(
                     format!(
                         "Mermaid failed to compile diagram (raw: {:?}; diagram snippet: {})",
-                        raw,
-                        snippet
+                        raw, snippet
                     ),
                     ErrorKind::InvalidData,
                 ));
@@ -169,7 +191,11 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
                             // Use default formatting for non-integers
                             format!("{}", newv)
                         };
-                        let new_full = if has_px { format!("{}px", new_str) } else { new_str };
+                        let new_full = if has_px {
+                            format!("{}px", new_str)
+                        } else {
+                            new_str
+                        };
                         let old = format!("{}=\"{}\"", attr, raw);
                         let new = format!("{}=\"{}\"", attr, new_full);
                         out = out.replacen(&old, &new, 1);
@@ -199,10 +225,22 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
                         ) {
                             let neww = w * scale;
                             let newh = h * scale;
-                            let new_raw = format!("{} {} {} {}", minx, miny, // keep minx/miny unchanged
-                                                  // Prefer integer formatting when possible
-                                                  if (neww - neww.trunc()).abs() < 1e-6 { format!("{}", neww as i64) } else { format!("{}", neww) },
-                                                  if (newh - newh.trunc()).abs() < 1e-6 { format!("{}", newh as i64) } else { format!("{}", newh) });
+                            let new_raw = format!(
+                                "{} {} {} {}",
+                                minx,
+                                miny, // keep minx/miny unchanged
+                                // Prefer integer formatting when possible
+                                if (neww - neww.trunc()).abs() < 1e-6 {
+                                    format!("{}", neww as i64)
+                                } else {
+                                    format!("{}", neww)
+                                },
+                                if (newh - newh.trunc()).abs() < 1e-6 {
+                                    format!("{}", newh as i64)
+                                } else {
+                                    format!("{}", newh)
+                                }
+                            );
                             let old = format!("viewBox=\"{}\"", raw);
                             let new = format!("viewBox=\"{}\"", new_raw);
                             out = out.replacen(&old, &new, 1);
@@ -329,7 +367,12 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
     /// This implementation prefers a fast string-based extraction of `width`/`height`
     /// or `viewBox` to avoid invoking the slow SVG parser on every diagram. Only if
     /// these heuristics fail do we fall back to a full parse.
-    pub(crate) fn compute_auto_scale(svg: &str, candidate_scale: f32, max_ratio: f32, page_size: Size) -> (f32, Option<crate::elements::Image>) {
+    pub(crate) fn compute_auto_scale(
+        svg: &str,
+        candidate_scale: f32,
+        max_ratio: f32,
+        page_size: Size,
+    ) -> (f32, Option<crate::elements::Image>) {
         // Fast path: extract width/height in pixels from attributes or viewBox
         if let Some((w_px, h_px)) = extract_svg_intrinsic_px(svg) {
             // Determine DPI (default 300 if not present)
@@ -340,8 +383,14 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
             let allowed_w = max_ratio * page_size.width.as_f32();
             let allowed_h = max_ratio * page_size.height.as_f32();
             if intrinsic_w_mm <= 0.0 || intrinsic_h_mm <= 0.0 {
-                if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
-                    eprintln!("compute_auto_scale: invalid intrinsic dims w_mm={} h_mm={}", intrinsic_w_mm, intrinsic_h_mm);
+                if std::env::var("RUST_LOG")
+                    .unwrap_or_default()
+                    .contains("debug")
+                {
+                    eprintln!(
+                        "compute_auto_scale: invalid intrinsic dims w_mm={} h_mm={}",
+                        intrinsic_w_mm, intrinsic_h_mm
+                    );
                 }
                 return (candidate_scale, None);
             }
@@ -349,7 +398,10 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
             let req_h = allowed_h / intrinsic_h_mm;
             let required_scale = req_w.min(req_h);
             let used = candidate_scale.min(required_scale.max(1e-6));
-            if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
+            if std::env::var("RUST_LOG")
+                .unwrap_or_default()
+                .contains("debug")
+            {
                 eprintln!("compute_auto_scale: fast path w_px={} h_px={} dpi={} intrinsic_mm=({}, {}) allowed_mm=({}, {}) req=(w:{} h:{}) candidate={} used={}",
                     w_px, h_px, dpi, intrinsic_w_mm, intrinsic_h_mm, allowed_w, allowed_h, req_w, req_h, candidate_scale, used);
             }
@@ -372,7 +424,10 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
             let used = candidate_scale.min(required_scale.max(1e-6));
             // If used != 1.0 set the image scale so the downstream renderer can reuse the
             // already-parsed `Image` instead of reparsing a scaled SVG string.
-            if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
+            if std::env::var("RUST_LOG")
+                .unwrap_or_default()
+                .contains("debug")
+            {
                 let intrinsic = img.get_intrinsic_size();
                 eprintln!("compute_auto_scale: slow path intrinsic=({}, {}) candidate={} required={} used={}",
                     intrinsic.width.as_f32(), intrinsic.height.as_f32(), candidate_scale, required_scale, used);
@@ -456,14 +511,18 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
     }
 
     impl Element for Mermaid {
-        fn render(&mut self, context: &Context, area: render::Area<'_>, style: Style) -> Result<RenderResult, Error> {
+        fn render(
+            &mut self,
+            context: &Context,
+            area: render::Area<'_>,
+            style: Style,
+        ) -> Result<RenderResult, Error> {
             // Render diagram either as SVG or PNG (raster fallback)
             // Render diagram to SVG string
             let svg = match Self::render_svg(&self.diagram) {
                 Ok(s) => s,
                 Err(e) => return Err(e),
             };
-
 
             // If auto-scaling is enabled we request the computed scale and allow
             // the helper to return an already-parsed `Image` to avoid double-parsing.
@@ -506,8 +565,14 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
             // surprising parsing behavior. If both fail and debugging is enabled, dump raw SVG.
             match crate::elements::Image::from_svg_string(&sanitized) {
                 Ok(mut img) => {
-                    if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
-                        eprintln!("--- BEGIN MERMAID SOURCE ---\n{}--- END MERMAID SOURCE ---", self.diagram);
+                    if std::env::var("RUST_LOG")
+                        .unwrap_or_default()
+                        .contains("debug")
+                    {
+                        eprintln!(
+                            "--- BEGIN MERMAID SOURCE ---\n{}--- END MERMAID SOURCE ---",
+                            self.diagram
+                        );
                         eprintln!("--- BEGIN MERMAID SANITIZED SVG ---\n{}\n--- END MERMAID SANITIZED SVG ---", sanitized);
                     }
                     img = img.with_alignment(self.alignment);
@@ -517,7 +582,11 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
                     if let Some(link) = &self.link {
                         img = img.with_link(link.clone());
                     }
-                    img.render(context, area, style)
+                    let result = img.render(context, area, style);
+                    // Add SVG source to RenderResult for reference
+                    let mut res = result?;
+                    res.svg = Some(sanitized);
+                    Ok(res)
                 }
                 Err(_san_err) => {
                     match crate::elements::Image::from_svg_string(&svg) {
@@ -534,7 +603,10 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
                         Err(err) => {
                             // Parsing failed even for raw SVG: if debugging is enabled, dump the raw
                             // SVG to stderr for analysis; otherwise fall back to a placeholder.
-                            if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
+                            if std::env::var("RUST_LOG")
+                                .unwrap_or_default()
+                                .contains("debug")
+                            {
                                 eprintln!("--- BEGIN MERMAID SVG (debug dump) ---");
                                 eprintln!("{}", svg);
                                 eprintln!("--- END MERMAID SVG ---");
@@ -547,7 +619,10 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
                             eprintln!("{}", msg);
                             let mut p = crate::elements::Paragraph::new(msg);
                             // Style to make the error visible but unobtrusive
-                            p = p.styled_string("Mermaid rendering failed", crate::style::Style::new().with_font_size(9));
+                            p = p.styled_string(
+                                "Mermaid rendering failed",
+                                crate::style::Style::new().with_font_size(9),
+                            );
                             p.render(context, area, style)
                         }
                     }
@@ -601,7 +676,7 @@ pub struct Mermaid {
     alignment: Alignment,
     position: Option<Position>,
     link: Option<String>,
-} 
+}
 
 #[cfg(feature = "mermaid")]
 impl Mermaid {
@@ -697,7 +772,8 @@ impl Mermaid {
         self.max_ratio = max_ratio;
         self.auto_scale = true;
         self
-    }}
+    }
+}
 
 #[cfg(all(test, feature = "mermaid"))]
 mod tests {
@@ -719,9 +795,18 @@ mod tests {
 
         // Prepare a very small context - Image rendering does not depend on font metrics but
         // Context is required by the Element API.
-        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
         let fd = crate::fonts::FontData::new(data, None).expect("font data");
-        let family = crate::fonts::FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let family = crate::fonts::FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
         let cache = crate::fonts::FontCache::new(family);
         let context = crate::Context::new(cache);
 
@@ -753,9 +838,18 @@ mod tests {
         // Try to render; if browser is not available we skip like above
         let mut r = Renderer::new(Size::new(200.0, 200.0), "t").expect("renderer");
         let area = r.first_page().first_layer().area();
-        let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
         let fd = crate::fonts::FontData::new(data, None).expect("font data");
-        let family = crate::fonts::FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+        let family = crate::fonts::FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
         let cache = crate::fonts::FontCache::new(family);
         let context = crate::Context::new(cache);
 
@@ -768,7 +862,11 @@ mod tests {
                 }
                 // For invalid mermaid syntax compile should fail. The helper may return
                 // a JS-side error object or a compilation failure message, accept both.
-                assert!(s.contains("Mermaid failed to compile") || s.contains("compile") || s.contains("Mermaid JS error"));
+                assert!(
+                    s.contains("Mermaid failed to compile")
+                        || s.contains("compile")
+                        || s.contains("Mermaid JS error")
+                );
             }
         }
     }
@@ -820,8 +918,8 @@ mod tests {
         let input = "<svg><path class=\"pieCircle\" d=\"M...Z\"/><path class=\"other\" d=\"M...Z\"/><text class=\"pieCircle\">X</text></svg>";
         // The class on the path should be removed but the text's class should remain
         let out = inner::strip_slice_class_from_path_tags(input);
-        assert!(out.contains("<path d=\"M...Z\"/>") );
-        assert!(out.contains("class=\"pieCircle\">X</text>") );
+        assert!(out.contains("<path d=\"M...Z\"/>"));
+        assert!(out.contains("class=\"pieCircle\">X</text>"));
         assert!(out.contains("class=\"other\""));
     }
 
@@ -841,7 +939,8 @@ mod tests {
         let intrinsic = img.get_intrinsic_size();
         let allowed_w = 0.9 * area_size.width.as_f32();
         let allowed_h = 0.9 * area_size.height.as_f32();
-        let max_scale = (allowed_w / intrinsic.width.as_f32()).min(allowed_h / intrinsic.height.as_f32());
+        let max_scale =
+            (allowed_w / intrinsic.width.as_f32()).min(allowed_h / intrinsic.height.as_f32());
         let expected = candidate.min(max_scale.max(1e-6));
         assert!((used - expected).abs() < 1e-3);
     }

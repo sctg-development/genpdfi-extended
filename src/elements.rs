@@ -328,6 +328,7 @@ mod tests {
                 Ok(RenderResult {
                     has_more: true,
                     size: Size::new(10.0, 5.0),
+                    svg: None,
                 })
             }
         }
@@ -790,6 +791,7 @@ impl Element for PageBreak {
             Ok(RenderResult {
                 size: Size::new(1, 0),
                 has_more: true,
+                svg: None,
             })
         }
     }

@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Ronan Le Meillat - SCTG Development
-// 
+//
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Licensed under the MIT License or the Apache License, Version 2.0
 
@@ -204,7 +204,11 @@ impl Element for Latex {
         }
 
         // Render the image
-        image.render(context, area, style)
+        let result = image.render(context, area, style);
+        // Add SVG source to RenderResult for reference
+        let mut res = result?;
+        res.svg = Some(scaled_svg);
+        Ok(res)
     }
 }
 

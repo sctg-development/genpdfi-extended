@@ -643,7 +643,7 @@ impl Document {
                 area = decorator.decorate_page(&self.context, area, self.style)?;
             }
             let result = self.root.render(&self.context, area, self.style)?;
-            results.push(result);
+            results.push(result.clone());
             if result.has_more {
                 if result.size == Size::new(0, 0) {
                     return Err(error::Error::new(
@@ -694,13 +694,15 @@ impl<E: elements::IntoBoxedElement> std::iter::Extend<E> for Document {
 /// for more information on the rendering process.
 ///
 /// [`Element::render`]: trait.Element.html#tymethod.render
-#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Default, PartialEq, PartialOrd)]
 pub struct RenderResult {
     /// The size of the area that has been written to, starting from the origin of the provided
     /// area.
     pub size: Size,
     /// Indicates whether the element contains more content that did not fit in the provided area.
     pub has_more: bool,
+    /// Optional SVG string (useful for LaTeX and Mermaid diagrams)
+    pub svg: Option<String>,
 }
 
 /// Prepares a page of a document.

@@ -36,3 +36,4 @@ assets/data
 subset_test.ttf
 tmp/
 cobertura.xml
+mermaid_pool/test_fixtures/
