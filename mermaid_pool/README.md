@@ -8,7 +8,7 @@ Quick start (local)
 
 1. Install dependencies and build:
 
-   cd examples/mermaid_pool
+   cd mermaid_pool
    npm ci
    npm run build
 

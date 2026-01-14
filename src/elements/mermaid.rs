@@ -17,9 +17,11 @@ use crate::{Alignment, Position, Size};
 #[cfg(feature = "mermaid")]
 mod inner {
     use std::fmt::Display;
+    use std::path::PathBuf;
 
     use escape_string::escape;
     use headless_chrome::Browser;
+    use serde_json;
     use unescape::unescape;
 
     use crate::error::{Context as _, Error, ErrorKind};
@@ -68,58 +70,166 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
         })
     }
 
+    // Attempt to render using an external mermaid pool helper bundle. This function
+    // will navigate to the helper page (using a file:// URL so query params work)
+    // and use the pool protocol (window.__mermaidPool.submitTask) to obtain the
+    // rendered SVG string. Errors returned here indicate the pool path failed and
+    // the caller can fall back to the embedded helper.
+    fn render_with_pool(browser: &Browser, helper_path: &std::path::PathBuf, diagram: &str) -> Result<String, Error> {
+        use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+        let tab = browser
+            .new_tab()
+            .map_err(|e| Error::new(format!("Failed to open tab for mermaid helper: {}", e), ErrorKind::Internal))?;
+
+        let abs = helper_path
+            .canonicalize()
+            .map_err(|e| Error::new(format!("Failed to canonicalize helper path {}: {}", helper_path.display(), e), ErrorKind::Internal))?;
+
+        // Allow configuring the pool size via env var for CI/diagnostics; default to 3.
+        let pool_size = std::env::var("MERMAID_POOL_SIZE").ok().and_then(|s| s.parse::<usize>().ok()).unwrap_or(3);
+
+        tab.navigate_to(&format!("file://{}?pool={}", abs.display(), pool_size))
+            .map_err(|e| Error::new(format!("Failed to navigate to helper page {}: {}", abs.display(), e), ErrorKind::Internal))?;
+
+        tab.wait_until_navigated()
+            .map_err(|e| Error::new(format!("Navigation to helper page failed: {}", e), ErrorKind::Internal))?;
+
+        // Try to read metrics if present. This is not required but helps debugging.
+        if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
+            match tab.wait_for_element("#mermaid-metrics") {
+                Ok(n) => match n.get_inner_text() {
+                    Ok(t) => eprintln!("mermaid helper metrics: {}", t),
+                    Err(_) => {}
+                },
+                Err(_) => {}
+            }
+        }
+
+        // Build a reasonably unique id for the task
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        let id = format!("genpdf-{}", now.as_millis());
+
+        // JSON-encode the diagram to avoid quoting/escaping issues in JS
+        let js_diagram = serde_json::to_string(diagram)
+            .map_err(|e| Error::new(format!("Failed to JSON-encode diagram: {}", e), ErrorKind::Internal))?;
+
+        let submit = format!("window.__mermaidPool.submitTask('{}', {})", id, js_diagram);
+
+        tab.evaluate(&submit, true)
+            .map_err(|e| Error::new(format!("Failed to submit mermaid task to helper: {}", e), ErrorKind::Internal))?;
+
+        // Small delay to avoid overwhelming the helper when called in tight loops
+        std::thread::sleep(Duration::from_millis(50));
+
+        // Wait for either success or error state on the task node. The pool sets
+        // `data-state='done'` on success or `data-state='error'` on failure and
+        // stores the SVG (or error text) in the node's textContent.
+        let selector = format!("#task-{}[data-state='done'],#task-{}[data-state='error']", id, id);
+        let node = tab
+            .wait_for_element(&selector)
+            .map_err(|e| Error::new(format!("Timed out waiting for mermaid task {}: {}", id, e), ErrorKind::Internal))?;
+
+        let text = node
+            .get_inner_text()
+            .map_err(|e| Error::new(format!("Failed to read mermaid result for {}: {}", id, e), ErrorKind::Internal))?;
+
+        // Detect error payloads produced by the helper (JSON error objects or explicit 'error' state)
+        let trimmed = text.trim();
+        if (trimmed.starts_with('{') && trimmed.contains("\"error\"")) || trimmed.is_empty() {
+            return Err(Error::new(format!("Mermaid helper error for {}: {}", id, text), ErrorKind::InvalidData));
+        }
+
+        Ok(text)
+    }
+
     impl Mermaid {
-        /// Renders the diagram string to an SVG string using an embedded helper page and
-        /// the `mermaid.min.js` script from `examples/helper`.
+        /// Renders the diagram string to an SVG string. Prefer using the external
+        /// "mermaid pool" helper bundle (if available) which reuses a single
+        /// headless Chrome instance and an in-page pool for faster concurrent renders.
+        /// If the helper bundle cannot be found or if an error occurs while using the
+        /// pool, fall back to the original embedded helper (data URI + injected
+        /// `mermaid.min.js`) to preserve behaviour and test expectations.
         pub fn render_svg(diagram: &str) -> Result<String, Error> {
-            // Use the shared Browser instance rather than starting a new one for every render.
             let browser = get_browser()?;
 
-            // The helper files used by the existing example are embedded in the crate and reused
-            // here so the rendering logic stays consistent. We embed both the `index.html`
-            // which defines a `render` helper and the `mermaid.min.js` runtime so no external
-            // network access is required during rendering.
+            // First, attempt to render using an external mermaid "pool" helper page
+            // if one can be discovered in the repository (recommended path: examples/mermaid_pool/dist/index.html).
+            match (|| -> Result<Option<String>, Error> {
+                // Helper discovery: try multiple likely locations. We allow overriding
+                // the discovery with the MERMAID_HELPER_PATH env var which can point
+                // to a built `dist/index.html` file for the helper.
+                use std::path::PathBuf;
+
+                if let Ok(env_path) = std::env::var("MERMAID_HELPER_PATH") {
+                    let p = PathBuf::from(env_path);
+                    if p.exists() {
+                        return Ok(Some(render_with_pool(&browser, &p, diagram)?));
+                    }
+                }
+
+                let candidates = [
+                    // Prefer the repo-root location first (new location)
+                    PathBuf::from("mermaid_pool/dist/index.html"),
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("mermaid_pool/dist/index.html"),
+                    // Keep backward-compatible locations
+                    PathBuf::from("examples/mermaid_pool/dist/index.html"),
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/mermaid_pool/dist/index.html"),
+                    PathBuf::from("examples/helper/mermaid_pool/dist/index.html"),
+                    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/helper/mermaid_pool/dist/index.html"),
+                    PathBuf::from("./dist/index.html"),
+                ];
+
+                for p in &candidates {
+                    if p.exists() {
+                        return Ok(Some(render_with_pool(&browser, &p, diagram)?));
+                    }
+                }
+
+                // No helper bundle found; caller should fall back to embedded helper.
+                Ok(None)
+            })() {
+                Ok(Some(s)) => return Ok(s),
+                Ok(None) => (), // fall through to embedded helper
+                Err(e) => {
+                    // Pool attempt failed for an operational reason; log and fall
+                    // back to the embedded helper to remain robust in varied
+                    // environments (CI, developer machines without the built bundle).
+                    if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
+                        eprintln!("mermaid pool helper failed; falling back: {}", e);
+                    }
+                }
+            }
+
+            // Fallback: embedded helper (existing behaviour) using a data URI and
+            // the `mermaid.min.js` runtime included in the crate.
             let mermaid_js = include_str!("../../examples/helper/mermaid.min.js");
             let html_payload = include_str!("../../examples/helper/index.html");
 
-            // Open a new tab and load the embedded helper page via a data URI. Using a data
-            // URI keeps the page self-contained and avoids I/O to disk or network.
             let tab = browser
                 .new_tab()
                 .map_err(|e| Error::new(format!("Failed to open tab: {}", e), ErrorKind::Internal))?;
             tab.navigate_to(&format!("data:text/html;charset=utf-8,{}", html_payload))
                 .map_err(|e| Error::new(format!("Failed to navigate: {}", e), ErrorKind::Internal))?;
-            // Wait for the navigation to finish so that the `render` helper is present on the page.
             tab.wait_until_navigated()
                 .map_err(|e| Error::new(format!("Navigation error: {}", e), ErrorKind::Internal))?;
 
-            // Inject the mermaid runtime into the page so it can compile the diagram string.
-            // We pass `false` for the optional await flag because loading the runtime is
-            // synchronous for our embedded script.
             tab.evaluate(mermaid_js, false)
                 .map_err(|e| Error::new(format!("Failed to evaluate mermaid script: {}", e), ErrorKind::Internal))?;
 
-            // Call the helper `render` function defined in index.html. We must escape the diagram
-            // so that single quotes and other characters don't break the JS call. The helper
-            // returns a JSON-encoded string on success or an error object on failure.
             let js_call = format!("render('{}')", escape(diagram));
             let data = tab
                 .evaluate(&js_call, true)
                 .map_err(|e| Error::new(format!("JS execution error: {}", e), ErrorKind::Internal))?;
 
             let raw = data.value.unwrap_or_default().to_string();
-            // The returned value is a quoted string; unescape and strip surrounding quotes.
             let svg = unescape(raw.trim_matches('\"')).unwrap_or_default();
 
-            // Detect whether the helper reported a JS-side error (we return a JSON error object
-            // from `examples/helper/index.html` in that case), or whether the result was `null`/empty.
             if svg.trim().starts_with('{') && svg.contains("\"error\"") {
                 return Err(Error::new(format!("Mermaid JS error: {}", svg), ErrorKind::InvalidData));
             }
 
             if svg == "null" || svg.trim().is_empty() {
-                // Provide a diagnostic with the raw JS response and a small snippet of the diagram so
-                // users can quickly see what went wrong.
                 let snippet = if diagram.len() > 200 { format!("{}...", &diagram[..200]) } else { diagram.to_string() };
                 return Err(Error::new(
                     format!(

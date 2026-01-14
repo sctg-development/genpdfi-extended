@@ -14,14 +14,14 @@
 //! Usage (developer machine):
 //!
 //! 1. Build the helper bundle:
-//!    cd examples/mermaid_pool
+//!    cd mermaid_pool
 //!    npm ci
 //!    npm run build
 //!
 //! 2. Run this example:
 //!    cargo run --example mermaid_pool_proof_of_concept --features "mermaid,images"
 //!
-//! The example will fail with a clear message if `examples/mermaid_pool/dist/index.html`
+//! The example will fail with a clear message if `mermaid_pool/dist/index.html`
 //! is not found; the build step above produces that file.
 
 // Copyright (c) 2026 Ronan Le Meillat - SCTG Development
@@ -517,6 +517,8 @@ fn load_helper_page() -> Result<PathBuf, String> {
     // Try multiple likely locations: relative path (when running from repo root)
     // and an absolute path based on CARGO_MANIFEST_DIR (safer when CWD differs).
     let candidates = [
+        PathBuf::from("mermaid_pool/dist/index.html"),
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("mermaid_pool/dist/index.html"),
         PathBuf::from("examples/mermaid_pool/dist/index.html"),
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/mermaid_pool/dist/index.html"),
         PathBuf::from("./dist/index.html"),
@@ -529,7 +531,7 @@ fn load_helper_page() -> Result<PathBuf, String> {
     }
 
     Err(format!(
-        "Built helper page not found. Tried: {}. Build via: cd examples/mermaid_pool && npm ci && npm run build",
+        "Built helper page not found. Tried: {}. Build via: cd mermaid_pool && npm ci && npm run build",
         candidates
             .iter()
             .map(|p| p.display().to_string())

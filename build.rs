@@ -7,12 +7,22 @@ use std::process::Command;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Directory containing the helper web project
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
-    let web_dir = manifest_dir.join("examples/mermaid_pool");
+    // Web helper is now located at the repository root (`./mermaid_pool`). Keep a fallback
+    // to the historical `examples/mermaid_pool` path for backwards compatibility.
+    let mut web_dir = manifest_dir.join("mermaid_pool");
 
-    // If the web dir doesn't exist, nothing to do
+    // If the web dir doesn't exist at the new location, fall back to the old one; if
+    // neither exist, skip the web build.
     if !web_dir.exists() {
-        println!("cargo:warning=No web helper dir at {} -- skipping web build", web_dir.display());
-        return Ok(());
+        let fallback = manifest_dir.join("examples/mermaid_pool");
+        if fallback.exists() {
+            println!("cargo:warning=Using legacy helper path {}", fallback.display());
+            // Use fallback for the remainder of the build script
+            web_dir = fallback;
+        } else {
+            println!("cargo:warning=No web helper dir at {} or at {} -- skipping web build", web_dir.display(), fallback.display());
+            return Ok(());
+        }
     }
 
     // Collect files we care about and emit rerun-if-changed for each
