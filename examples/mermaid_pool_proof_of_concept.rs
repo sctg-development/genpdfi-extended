@@ -513,37 +513,26 @@ flowchart LR
 "#,
 ];
 
-fn load_helper_page() -> Result<PathBuf, String> {
-    // Try multiple likely locations: relative path (when running from repo root)
-    // and an absolute path based on CARGO_MANIFEST_DIR (safer when CWD differs).
-    let candidates = [
-        PathBuf::from("mermaid_pool/dist/index.html"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("mermaid_pool/dist/index.html"),
-        PathBuf::from("examples/mermaid_pool/dist/index.html"),
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/mermaid_pool/dist/index.html"),
-        PathBuf::from("./dist/index.html"),
-    ];
+// The helper is included statically at compile-time. This means the file
+// `mermaid_pool/dist/index.html` must be present when compiling this crate
+// (run `cd mermaid_pool && npm ci && npm run build` before building this example).
+// We include the file using `include_str!` and write it to a temporary file at
+// runtime so we can navigate to a file:// URL with query parameters.
+const EMBEDDED_HELPER_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/mermaid_pool/dist/index.html"));
 
-    for p in &candidates {
-        if p.exists() {
-            return Ok(p.to_path_buf());
-        }
-    }
-
-    Err(format!(
-        "Built helper page not found. Tried: {}. Build via: cd mermaid_pool && npm ci && npm run build",
-        candidates
-            .iter()
-            .map(|p| p.display().to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-    ))
+fn write_embedded_helper() -> Result<PathBuf, String> {
+    let tmp_dir = std::env::temp_dir();
+    let fname = format!("mermaid_pool_embedded_{}.html", std::process::id());
+    let path = tmp_dir.join(fname);
+    std::fs::write(&path, EMBEDDED_HELPER_HTML)
+        .map_err(|e| format!("Failed to write embedded helper to {}: {}", path.display(), e))?;
+    Ok(path)
 }
 
 #[cfg(feature = "mermaid")]
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Locate the built helper page path
-    let helper_path = match load_helper_page() {
+    // Write the embedded helper HTML to a temp file and use that file:// URL
+    let helper_path = match write_embedded_helper() {
         Ok(p) => p,
         Err(msg) => {
             eprintln!("{}", msg);
