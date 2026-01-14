@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Ismael Theiskaa
 // Copyright (c) 2026 Ronan Le Meillat - SCTG Development
-// 
+//
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Licensed under the MIT License or the Apache License, Version 2.0
 
@@ -450,7 +450,7 @@ impl<T: Into<Mm>> From<T> for Margins {
 /// doc.push(elements::Paragraph::new("Document content"));
 /// // Render to an in-memory buffer (no filesystem side effects in doctest)
 /// let mut buf = Vec::new();
-/// doc.render(&mut buf).expect("Failed to render document");
+/// let _render_results = doc.render(&mut buf).expect("Failed to render document");
 /// assert!(!buf.is_empty());
 /// ```
 ///
@@ -621,10 +621,10 @@ impl Document {
     /// let mut doc = Document::new(family);
     /// doc.push(elements::Paragraph::new("Hello, world!"));
     /// let mut out = Vec::new();
-    /// doc.render(&mut out).expect("render");
+    /// let _render_results = doc.render(&mut out).expect("render");
     /// assert!(!out.is_empty());
     /// ```
-    pub fn render(mut self, w: impl io::Write) -> Result<(), error::Error> {
+    pub fn render(mut self, w: impl io::Write) -> Result<Vec<RenderResult>, error::Error> {
         let mut renderer = render::Renderer::new(self.paper_size, &self.title)?;
         if let Some(conformance) = self.conformance {
             renderer = renderer.with_conformance(conformance);
@@ -636,12 +636,14 @@ impl Document {
             renderer = renderer.with_modification_date(modification_date);
         }
         self.context.font_cache.load_pdf_fonts(&mut renderer)?;
+        let mut results = Vec::new();
         loop {
             let mut area = renderer.last_page().last_layer().area();
             if let Some(decorator) = &mut self.decorator {
                 area = decorator.decorate_page(&self.context, area, self.style)?;
             }
             let result = self.root.render(&self.context, area, self.style)?;
+            results.push(result);
             if result.has_more {
                 if result.size == Size::new(0, 0) {
                     return Err(error::Error::new(
@@ -654,7 +656,8 @@ impl Document {
                 break;
             }
         }
-        renderer.write(w)
+        renderer.write(w)?;
+        Ok(results)
     }
 
     /// Renders this document into a PDF file at the given path.
@@ -663,7 +666,10 @@ impl Document {
     ///
     /// For details on the rendering process, see the [Rendering Process section of the crate
     /// documentation](index.html#rendering-process).
-    pub fn render_to_file(self, path: impl AsRef<path::Path>) -> Result<(), error::Error> {
+    pub fn render_to_file(
+        self,
+        path: impl AsRef<path::Path>,
+    ) -> Result<Vec<RenderResult>, error::Error> {
         let path = path.as_ref();
         let file = fs::File::create(path)
             .with_context(|| format!("Could not create file {}", path.display()))?;

@@ -876,7 +876,7 @@ fn render_each_mermaid_block_to_pdf() {
                 img = img.with_alignment(Alignment::Center);
                 let render_start = Instant::now();
                 match doc_with_img.render_to_file(output_path) {
-                    Ok(()) => {
+                    Ok(_) => {
                         let render_dur = render_start.elapsed();
                         eprintln!("Rendered diagram {} in {:.3?} (render total)", i + 1, render_dur);
                     }
@@ -891,7 +891,7 @@ fn render_each_mermaid_block_to_pdf() {
                 // Fall back to original path if parse failed: let doc.render_to_file handle it and report
                 let render_start = Instant::now();
                 match doc.render_to_file(output_path) {
-                    Ok(()) => {
+                    Ok(_) => {
                         let render_dur = render_start.elapsed();
                         eprintln!("Rendered diagram {} (fallback) in {:.3?} (render)", i + 1, render_dur);
                     }

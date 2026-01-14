@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Ismael Theiskaa
 // Copyright (c) 2026 Ronan Le Meillat - SCTG Development
-// 
+//
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Licensed under the MIT License or the Apache License, Version 2.0
 
@@ -1697,7 +1697,7 @@ impl<'a, E: IntoBoxedElement> iter::Extend<E> for TableLayoutRow<'a> {
 ///
 /// // Render to an in-memory buffer (no files written)
 /// let mut buf = Vec::new();
-/// doc.render(&mut buf).expect("render document");
+/// let _render_results = doc.render(&mut buf).expect("render document");
 /// assert!(!buf.is_empty());
 /// ```
 ///
@@ -1720,7 +1720,7 @@ impl<'a, E: IntoBoxedElement> iter::Extend<E> for TableLayoutRow<'a> {
 /// doc.push(table);
 ///
 /// let mut buf = Vec::new();
-/// doc.render(&mut buf).expect("render document builtin");
+/// let _render_results = doc.render(&mut buf).expect("render document builtin");
 /// assert!(!buf.is_empty());
 /// ```
 ///
