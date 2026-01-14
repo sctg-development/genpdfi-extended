@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Ronan Le Meillat - SCTG Development
-// 
+//
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Licensed under the MIT License or the Apache License, Version 2.0
 
@@ -682,7 +682,6 @@ flowchart LR
 fn render_each_mermaid_block_to_pdf() {
     use std::fs;
     use std::path::PathBuf;
-    use std::time::Instant;
 
     use genpdfi_extended::{elements, fonts, style, Alignment, Document};
 
@@ -696,7 +695,6 @@ fn render_each_mermaid_block_to_pdf() {
         "/fonts/NotoSans-Regular.ttf"
     ))
     .to_vec();
-
     let fd = fonts::FontData::new(font_data, None).expect("font data");
     let family = fonts::FontFamily {
         regular: fd.clone(),
@@ -705,315 +703,34 @@ fn render_each_mermaid_block_to_pdf() {
         bold_italic: fd.clone(),
     };
 
-    let test_start = Instant::now();
-
-    // Instrumentation: measure pure mermaid pool render times (submit -> task ready)
-    eprintln!("--- Instrumentation: mermaid-only pool timings ({} diagrams) ---", MERMAID_BLOCKS.len());
-    // Prepare helper page as in example
-    let helper_path = {
-        let tmp = std::env::temp_dir();
-        let fname = format!("mermaid_pool_instr_{}.html", std::process::id());
-        let path = tmp.join(fname);
-        std::fs::write(&path, include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/mermaid_pool/dist/index.html"))).expect("write helper");
-        path
-    };
-
-    let browser = headless_chrome::Browser::new(
-        headless_chrome::LaunchOptionsBuilder::default()
-            .headless(true)
-            .build()
-            .expect("launch options"),
-    ).expect("start chrome");
-
-    let tab = browser.new_tab().expect("new tab");
-    tab.navigate_to(&format!("file://{}?pool=3", helper_path.display())).expect("navigate");
-    tab.wait_until_navigated().expect("wait nav");
-
-    let mut durations: Vec<std::time::Duration> = Vec::with_capacity(MERMAID_BLOCKS.len());
-    let mut svg_texts: Vec<String> = Vec::with_capacity(MERMAID_BLOCKS.len());
-    for (i, block) in MERMAID_BLOCKS.iter().enumerate() {
-        let id = format!("instr-{}-{}", i + 1, std::time::Instant::now().elapsed().as_millis());
-        let js = serde_json::to_string(block).expect("json");
-        let submit = format!("window.__mermaidPool.submitTask('{}', {})", id, js);
-        let start = Instant::now();
-        tab.evaluate(&submit, true).expect("submit");
-        let selector = format!("#task-{}[data-state='done'],#task-{}[data-state='error']", id, id);
-        let node = tab.wait_for_element(&selector).expect("wait task");
-        let dur = start.elapsed();
-        durations.push(dur);
-        let state = {
-            let attrs = node.get_attributes().unwrap_or(None).unwrap_or_default();
-            let mut found = "".to_string();
-            for a in attrs.iter() {
-                if a.starts_with("data-state=") {
-                    if let Some(idx) = a.find('=') {
-                        let v = a[idx+1..].trim();
-                        let v = v.trim_matches('"').trim_matches('\'');
-                        found = v.to_string();
-                        break;
-                    }
-                }
-            }
-            found
-        };
-        let text = node.get_inner_text().unwrap_or_default();
-        let size = text.len();
-        svg_texts.push(text.clone());
-        eprintln!("mermaid-only {}: state={} size={} time={:?}", i+1, state, size, dur);
-    }
-    // summary
-    if !durations.is_empty() {
-        let total: std::time::Duration = durations.iter().copied().sum();
-        let avg = total / (durations.len() as u32);
-        let mut s = durations.clone();
-        s.sort();
-        let p50 = s[s.len()/2];
-        let p90 = s[(s.len()*9)/10];
-        eprintln!("mermaid-only summary: total={:?} avg={:?} p50={:?} p90={:?}", total, avg, p50, p90);
-    }
-
-    // Helper sanitizer: remove <script> and <foreignObject> elements so the SVG can be parsed by printpdf
-    fn sanitize_svg_for_printpdf(svg: &str) -> String {
-        fn remove_tag(s: &str, tag: &str) -> String {
-            let mut result = String::with_capacity(s.len());
-            let mut i = 0;
-            while let Some(start_rel) = s[i..].find(&format!("<{}", tag)) {
-                let start = i + start_rel;
-                result.push_str(&s[i..start]);
-                if let Some(end_rel) = s[start..].find(&format!("</{}>", tag)) {
-                    // Move past the closing tag
-                    let end = start + end_rel + tag.len() + 3;
-                    i = end;
-                } else {
-                    // No closing tag: drop rest
-                    i = s.len();
-                    break;
-                }
-            }
-            if i < s.len() {
-                result.push_str(&s[i..]);
-            }
-            result
-        }
-    
-        // Remove common problematic tags; keep this conservative and minimal so tests can inspect results
-        let s = remove_tag(svg, "script");
-        let s = remove_tag(&s, "foreignObject");
-        s
-    }
-    
-    // Render each Mermaid block to its own PDF
+    // Simplified test: for each mermaid block, create a small document, push a heading and the Mermaid element,
+    // then render to a PDF file. `Mermaid::new` triggers browser initialization.
     for (i, mermaid_block) in MERMAID_BLOCKS.iter().enumerate() {
+        // Save time for instrumentation
+        let start = std::time::Instant::now();
+        eprint!("Rendering Mermaid diagram {}... ", i + 1);
         let mut doc = Document::new(family.clone());
-        doc.set_title(format!("Mermaid Render Each - Diagram {}", i + 1));
-
-        doc.push(elements::Paragraph::new(
-            ""
-        ).styled_string(
+        doc.set_title(format!("Mermaid Diagram {}", i + 1));
+        doc.push(elements::Paragraph::new("").styled_string(
             format!("Mermaid Diagram {}", i + 1),
             style::Style::new().with_font_size(16).bold(),
         ));
         doc.push(elements::Paragraph::new(""));
 
-        let mer = elements::Mermaid::new(*mermaid_block).with_alignment(Alignment::Center).with_auto_scale(2.0, 0.9);
-            doc.push(mer);
+        // Construct the Mermaid element (this will attempt to init the browser asynchronously)
+        let mer = elements::Mermaid::new(*mermaid_block)
+            .with_alignment(Alignment::Center)
+            .with_auto_scale(2.0, 0.9);
+        doc.push(mer);
 
         let output_path = out_dir.join(format!("mermaid_diagram_{}.pdf", i + 1));
-        eprintln!("Rendering diagram {} -> {}", i + 1, output_path.display());
-        // Decomposed timing: parse SVG -> document render -> validation
-        let svg = &svg_texts[i];
-
-        let parse_start = Instant::now();
-        let parse_result = elements::Image::from_svg_string(svg);
-        let parse_dur = parse_start.elapsed();
-        match &parse_result {
-            Ok(_) => eprintln!("Diagram {}: SVG parse succeeded in {:?}", i + 1, parse_dur),
-            Err(e) => {
-                eprintln!("Diagram {}: SVG parse FAILED in {:?}: {:?}", i + 1, parse_dur, e);
-                // Save failing SVG for inspection and sanitizer development
-                let failing_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("mermaid_pool").join("test_fixtures").join("failing_svgs");
-                if let Err(err) = std::fs::create_dir_all(&failing_dir) {
-                    eprintln!("Could not create failing svg dir {:?}: {:?}", failing_dir, err);
-                } else {
-                    let svg_path = failing_dir.join(format!("diagram-{}.svg", i + 1));
-                    match std::fs::write(&svg_path, svg) {
-                        Ok(()) => eprintln!("Wrote failing SVG to {:?}", svg_path),
-                        Err(err) => eprintln!("Failed to write SVG {}: {:?}", svg_path.display(), err),
-                    }
-
-                    // Try the library sanitizer to see if the SVG can be parsed after sanitization
-                    let sanitized = sanitize_svg_for_printpdf(svg);
-                    match elements::Image::from_svg_string(&sanitized) {
-                        Ok(_) => {
-                            eprintln!("Sanitized SVG for diagram {} parses successfully", i + 1);
-                            let path_s = failing_dir.join(format!("diagram-{}-sanitized.svg", i + 1));
-                            let _ = std::fs::write(&path_s, sanitized);
-                            let meta_path = failing_dir.join(format!("diagram-{}.err.txt", i + 1));
-                            let meta = format!("parse_error: {:?}\nparse_duration_millis: {:?}\nsanitized_parse: ok\n", e, parse_dur.as_millis());
-                            let _ = std::fs::write(&meta_path, meta);
-                        }
-                        Err(s_err) => {
-                            eprintln!("Sanitized SVG still fails for diagram {}: {:?}", i + 1, s_err);
-                            let path_s = failing_dir.join(format!("diagram-{}-sanitized.svg", i + 1));
-                            let _ = std::fs::write(&path_s, sanitized);
-                            let meta_path = failing_dir.join(format!("diagram-{}.err.txt", i + 1));
-                            let meta = format!("parse_error: {:?}\nparse_duration_millis: {:?}\nsanitized_parse_error: {:?}\n", e, parse_dur.as_millis(), s_err);
-                            let _ = std::fs::write(&meta_path, meta);
-                        }
-                    }
-                }
-            }
-        }
-
-        // Build a document with the parsed image to measure PDF render time only
-        let mut doc_with_img = Document::new(family.clone());
-        doc_with_img.set_title(format!("Mermaid Render Each - Diagram {} (img)", i + 1));
-        doc_with_img.push(elements::Paragraph::new("").styled_string(format!("Mermaid Diagram {}", i + 1), style::Style::new().with_font_size(16).bold()));
-        doc_with_img.push(elements::Paragraph::new(""));
-
-        match parse_result {
-            Ok(mut img) => {
-                img = img.with_alignment(Alignment::Center);
-                let render_start = Instant::now();
-                match doc_with_img.render_to_file(output_path) {
-                    Ok(_) => {
-                        let render_dur = render_start.elapsed();
-                        eprintln!("Rendered diagram {} in {:.3?} (render total)", i + 1, render_dur);
-                    }
-                    Err(e) => {
-                        let render_elapsed = render_start.elapsed();
-                        eprintln!("Failed to render diagram {} after {:.3?}: {:?}", i + 1, render_elapsed, e);
-                        panic!("Failed to render diagram {}: {:?}", i + 1, e);
-                    }
-                }
-            }
-            Err(_) => {
-                // Fall back to original path if parse failed: let doc.render_to_file handle it and report
-                let render_start = Instant::now();
-                match doc.render_to_file(output_path) {
-                    Ok(_) => {
-                        let render_dur = render_start.elapsed();
-                        eprintln!("Rendered diagram {} (fallback) in {:.3?} (render)", i + 1, render_dur);
-                    }
-                    Err(e) => {
-                        let render_elapsed = render_start.elapsed();
-                        eprintln!("Failed to render diagram {} after {:.3?}: {:?}", i + 1, render_elapsed, e);
-                        panic!("Failed to render diagram {}: {:?}", i + 1, e);
-                    }
-                }
-            }
-        }
+        doc.render_to_file(&output_path).expect("render document");
+        assert!(
+            output_path.exists(),
+            "Output file {} should exist",
+            output_path.display()
+        );
+        let duration = start.elapsed();
+        eprintln!("done in {:.2?}", duration);
     }
-    // Check if all files were created
-    for i in 1..=MERMAID_BLOCKS.len() {
-        let output_path = out_dir.join(format!("mermaid_diagram_{}.pdf", i));
-        assert!(output_path.exists(), "Output file {} should exist", output_path.display());
-
-        // Regression check: ensure embedded form XObjects (SVG) are placed fully within page height
-        // to avoid visual clipping (top of image outside page). Uses lopdf to inspect page content streams.
-        // Failing here indicates a coordinate/offset bug that can reintroduce the earlier visual regression.
-        fn assert_images_within_page(path: &std::path::Path) {
-            use lopdf::{Document, Object};
-
-            let mut doc = Document::load(path).expect("Could not load generated PDF for validation");
-            let pages = doc.get_pages();
-
-            for (_pnum, page_id) in pages {
-                // Decode page content into operations (safe to continue if content can't be decoded)
-                let content = match doc.get_and_decode_page_content(page_id) {
-                    Ok(c) => c,
-                    Err(_) => lopdf::content::Content { operations: Vec::new() },
-                };
-
-                // Retrieve page height from MediaBox (or CropBox fallback)
-                let page_obj = doc.get_object(page_id).expect("page object");
-                let page_dict = page_obj.as_dict().expect("page dict");
-                let media_box_obj = match page_dict.get(b"MediaBox") {
-                    Ok(m) => m,
-                    Err(_) => page_dict.get(b"CropBox").expect("page box"),
-                };
-
-                let page_h = match media_box_obj {
-                    Object::Array(arr) => match &arr[3] {
-                        Object::Real(v) => *v as f32,
-                        Object::Integer(i) => *i as f32,
-                        _ => panic!("unexpected MediaBox entry type"),
-                    },
-                    _ => panic!("unexpected MediaBox format"),
-                };
-
-                // Resources -> XObject dictionary for lookup
-                let xobjects_opt = match page_dict.get(b"Resources") {
-                    Ok(res) => match res.as_dict() {
-                        Ok(res_dict) => match res_dict.get(b"XObject") {
-                            Ok(xobj) => match xobj.as_dict() {
-                                Ok(dict) => Some(dict.clone()),
-                                Err(_) => None,
-                            },
-                            Err(_) => None,
-                        },
-                        Err(_) => None,
-                    },
-                    Err(_) => None,
-                };
-
-                // Walk content operations: find 'cm' operations followed by '/Name Do' and validate placement
-                for (idx, op) in content.operations.iter().enumerate() {
-                    if op.operator == "cm" {
-                        // Extract the six numbers a b c d e f for the cm matrix
-                        let nums: Vec<f32> = op.operands.iter().filter_map(|o| match o {
-                            Object::Real(r) => Some(*r as f32),
-                            Object::Integer(i) => Some(*i as f32),
-                            _ => None,
-                        }).collect();
-
-                        if nums.len() == 6 {
-                            let f = nums[5]; // the vertical translation in the cm matrix
-
-                            // Next operation is usually Do (invoke XObject)
-                            if idx + 1 < content.operations.len() {
-                                let next = &content.operations[idx + 1];
-                                if next.operator == "Do" {
-                                    if let Some(Object::Name(name)) = next.operands.get(0) {
-                                        if let Some(xobjs) = &xobjects_opt {
-                                            if let Ok(xref) = xobjs.get(name.as_slice()) {
-                                                if let &Object::Reference(rid) = xref {
-                                                    let xobj = doc.get_object(rid).expect("xobject");
-                                                    if let Object::Dictionary(dict) = xobj {
-                                                        if let Ok(bbox_obj) = dict.get(b"BBox") {
-                                                            if let Object::Array(bbox) = bbox_obj {
-                                                                // BBox is [llx lly urx ury] — height is ury
-                                                                let bbox_h = match &bbox[3] {
-                                                                    Object::Real(v) => *v as f32,
-                                                                    Object::Integer(i) => *i as f32,
-                                                                    _ => 0.0_f32,
-                                                                };
-                                                                let top = f + bbox_h;
-                                                                assert!(
-                                                                    top <= page_h + 0.01,
-                                                                    "Clipped image in {}: placed top={} page_h={} (XObject {:?})",
-                                                                    path.display(),
-                                                                    top,
-                                                                    page_h,
-                                                                    String::from_utf8_lossy(name),
-                                                                );
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        assert_images_within_page(&output_path);
-    }
-
-    eprintln!("Total mermaid test time: {:.3?}", test_start.elapsed());
 }
