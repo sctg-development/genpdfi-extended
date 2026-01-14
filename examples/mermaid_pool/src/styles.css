@@ -1,0 +1,8 @@
+/* Hidden containers are off-screen; keep minimal styles for safety */
+body {
+  font-family: system-ui, sans-serif;
+}
+
+div[data-state] {
+  display: none;
+}

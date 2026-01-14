@@ -33,6 +33,7 @@ subsetter = "0.2.3"
 ttf-parser = "0.25.1"
 clap = { version = "4.5.54", features = ["derive"] }
 flate2 = "1.0"
+serde_json = "1.0"
 
 [dependencies.image]
 version = "0.25.9"

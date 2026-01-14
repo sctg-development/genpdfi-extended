@@ -17,6 +17,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libcairo2-dev libpango1.0-dev libfontconfig1-dev pkg-config pkg-config libssl-dev clang
       # install meson and nija with --break-system-packages
@@ -93,6 +97,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libcairo2-dev libpango1.0-dev libfontconfig1-dev pkg-config pkg-config libssl-dev clang
       # install meson and nija with --break-system-packages
