@@ -707,6 +707,101 @@ fn render_each_mermaid_block_to_pdf() {
 
     let test_start = Instant::now();
 
+    // Instrumentation: measure pure mermaid pool render times (submit -> task ready)
+    eprintln!("--- Instrumentation: mermaid-only pool timings ({} diagrams) ---", MERMAID_BLOCKS.len());
+    // Prepare helper page as in example
+    let helper_path = {
+        let tmp = std::env::temp_dir();
+        let fname = format!("mermaid_pool_instr_{}.html", std::process::id());
+        let path = tmp.join(fname);
+        std::fs::write(&path, include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/mermaid_pool/dist/index.html"))).expect("write helper");
+        path
+    };
+
+    let browser = headless_chrome::Browser::new(
+        headless_chrome::LaunchOptionsBuilder::default()
+            .headless(true)
+            .build()
+            .expect("launch options"),
+    ).expect("start chrome");
+
+    let tab = browser.new_tab().expect("new tab");
+    tab.navigate_to(&format!("file://{}?pool=3", helper_path.display())).expect("navigate");
+    tab.wait_until_navigated().expect("wait nav");
+
+    let mut durations: Vec<std::time::Duration> = Vec::with_capacity(MERMAID_BLOCKS.len());
+    let mut svg_texts: Vec<String> = Vec::with_capacity(MERMAID_BLOCKS.len());
+    for (i, block) in MERMAID_BLOCKS.iter().enumerate() {
+        let id = format!("instr-{}-{}", i + 1, std::time::Instant::now().elapsed().as_millis());
+        let js = serde_json::to_string(block).expect("json");
+        let submit = format!("window.__mermaidPool.submitTask('{}', {})", id, js);
+        let start = Instant::now();
+        tab.evaluate(&submit, true).expect("submit");
+        let selector = format!("#task-{}[data-state='done'],#task-{}[data-state='error']", id, id);
+        let node = tab.wait_for_element(&selector).expect("wait task");
+        let dur = start.elapsed();
+        durations.push(dur);
+        let state = {
+            let attrs = node.get_attributes().unwrap_or(None).unwrap_or_default();
+            let mut found = "".to_string();
+            for a in attrs.iter() {
+                if a.starts_with("data-state=") {
+                    if let Some(idx) = a.find('=') {
+                        let v = a[idx+1..].trim();
+                        let v = v.trim_matches('"').trim_matches('\'');
+                        found = v.to_string();
+                        break;
+                    }
+                }
+            }
+            found
+        };
+        let text = node.get_inner_text().unwrap_or_default();
+        let size = text.len();
+        svg_texts.push(text.clone());
+        eprintln!("mermaid-only {}: state={} size={} time={:?}", i+1, state, size, dur);
+    }
+    // summary
+    if !durations.is_empty() {
+        let total: std::time::Duration = durations.iter().copied().sum();
+        let avg = total / (durations.len() as u32);
+        let mut s = durations.clone();
+        s.sort();
+        let p50 = s[s.len()/2];
+        let p90 = s[(s.len()*9)/10];
+        eprintln!("mermaid-only summary: total={:?} avg={:?} p50={:?} p90={:?}", total, avg, p50, p90);
+    }
+
+    // Helper sanitizer: remove <script> and <foreignObject> elements so the SVG can be parsed by printpdf
+    fn sanitize_svg_for_printpdf(svg: &str) -> String {
+        fn remove_tag(s: &str, tag: &str) -> String {
+            let mut result = String::with_capacity(s.len());
+            let mut i = 0;
+            while let Some(start_rel) = s[i..].find(&format!("<{}", tag)) {
+                let start = i + start_rel;
+                result.push_str(&s[i..start]);
+                if let Some(end_rel) = s[start..].find(&format!("</{}>", tag)) {
+                    // Move past the closing tag
+                    let end = start + end_rel + tag.len() + 3;
+                    i = end;
+                } else {
+                    // No closing tag: drop rest
+                    i = s.len();
+                    break;
+                }
+            }
+            if i < s.len() {
+                result.push_str(&s[i..]);
+            }
+            result
+        }
+    
+        // Remove common problematic tags; keep this conservative and minimal so tests can inspect results
+        let s = remove_tag(svg, "script");
+        let s = remove_tag(&s, "foreignObject");
+        s
+    }
+    
     // Render each Mermaid block to its own PDF
     for (i, mermaid_block) in MERMAID_BLOCKS.iter().enumerate() {
         let mut doc = Document::new(family.clone());
@@ -725,16 +820,87 @@ fn render_each_mermaid_block_to_pdf() {
 
         let output_path = out_dir.join(format!("mermaid_diagram_{}.pdf", i + 1));
         eprintln!("Rendering diagram {} -> {}", i + 1, output_path.display());
-        let render_start = Instant::now();
-        match doc.render_to_file(output_path) {
-            Ok(()) => {
-                let render_dur = render_start.elapsed();
-                eprintln!("Rendered diagram {} in {:.3?} (render)", i + 1, render_dur);
-            }
+        // Decomposed timing: parse SVG -> document render -> validation
+        let svg = &svg_texts[i];
+
+        let parse_start = Instant::now();
+        let parse_result = elements::Image::from_svg_string(svg);
+        let parse_dur = parse_start.elapsed();
+        match &parse_result {
+            Ok(_) => eprintln!("Diagram {}: SVG parse succeeded in {:?}", i + 1, parse_dur),
             Err(e) => {
-                let render_elapsed = render_start.elapsed();
-                eprintln!("Failed to render diagram {} after {:.3?}: {:?}", i + 1, render_elapsed, e);
-                panic!("Failed to render diagram {}: {:?}", i + 1, e);
+                eprintln!("Diagram {}: SVG parse FAILED in {:?}: {:?}", i + 1, parse_dur, e);
+                // Save failing SVG for inspection and sanitizer development
+                let failing_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("mermaid_pool").join("test_fixtures").join("failing_svgs");
+                if let Err(err) = std::fs::create_dir_all(&failing_dir) {
+                    eprintln!("Could not create failing svg dir {:?}: {:?}", failing_dir, err);
+                } else {
+                    let svg_path = failing_dir.join(format!("diagram-{}.svg", i + 1));
+                    match std::fs::write(&svg_path, svg) {
+                        Ok(()) => eprintln!("Wrote failing SVG to {:?}", svg_path),
+                        Err(err) => eprintln!("Failed to write SVG {}: {:?}", svg_path.display(), err),
+                    }
+
+                    // Try the library sanitizer to see if the SVG can be parsed after sanitization
+                    let sanitized = sanitize_svg_for_printpdf(svg);
+                    match elements::Image::from_svg_string(&sanitized) {
+                        Ok(_) => {
+                            eprintln!("Sanitized SVG for diagram {} parses successfully", i + 1);
+                            let path_s = failing_dir.join(format!("diagram-{}-sanitized.svg", i + 1));
+                            let _ = std::fs::write(&path_s, sanitized);
+                            let meta_path = failing_dir.join(format!("diagram-{}.err.txt", i + 1));
+                            let meta = format!("parse_error: {:?}\nparse_duration_millis: {:?}\nsanitized_parse: ok\n", e, parse_dur.as_millis());
+                            let _ = std::fs::write(&meta_path, meta);
+                        }
+                        Err(s_err) => {
+                            eprintln!("Sanitized SVG still fails for diagram {}: {:?}", i + 1, s_err);
+                            let path_s = failing_dir.join(format!("diagram-{}-sanitized.svg", i + 1));
+                            let _ = std::fs::write(&path_s, sanitized);
+                            let meta_path = failing_dir.join(format!("diagram-{}.err.txt", i + 1));
+                            let meta = format!("parse_error: {:?}\nparse_duration_millis: {:?}\nsanitized_parse_error: {:?}\n", e, parse_dur.as_millis(), s_err);
+                            let _ = std::fs::write(&meta_path, meta);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Build a document with the parsed image to measure PDF render time only
+        let mut doc_with_img = Document::new(family.clone());
+        doc_with_img.set_title(format!("Mermaid Render Each - Diagram {} (img)", i + 1));
+        doc_with_img.push(elements::Paragraph::new("").styled_string(format!("Mermaid Diagram {}", i + 1), style::Style::new().with_font_size(16).bold()));
+        doc_with_img.push(elements::Paragraph::new(""));
+
+        match parse_result {
+            Ok(mut img) => {
+                img = img.with_alignment(Alignment::Center);
+                let render_start = Instant::now();
+                match doc_with_img.render_to_file(output_path) {
+                    Ok(()) => {
+                        let render_dur = render_start.elapsed();
+                        eprintln!("Rendered diagram {} in {:.3?} (render total)", i + 1, render_dur);
+                    }
+                    Err(e) => {
+                        let render_elapsed = render_start.elapsed();
+                        eprintln!("Failed to render diagram {} after {:.3?}: {:?}", i + 1, render_elapsed, e);
+                        panic!("Failed to render diagram {}: {:?}", i + 1, e);
+                    }
+                }
+            }
+            Err(_) => {
+                // Fall back to original path if parse failed: let doc.render_to_file handle it and report
+                let render_start = Instant::now();
+                match doc.render_to_file(output_path) {
+                    Ok(()) => {
+                        let render_dur = render_start.elapsed();
+                        eprintln!("Rendered diagram {} (fallback) in {:.3?} (render)", i + 1, render_dur);
+                    }
+                    Err(e) => {
+                        let render_elapsed = render_start.elapsed();
+                        eprintln!("Failed to render diagram {} after {:.3?}: {:?}", i + 1, render_elapsed, e);
+                        panic!("Failed to render diagram {}: {:?}", i + 1, e);
+                    }
+                }
             }
         }
     }

@@ -120,7 +120,7 @@ export class Renderer {
         // mermaid.init optionally accepts configuration, some versions accept a parent
         // eslint-disable-next-line @typescript-eslint/ban-ts-comment
         // @ts-ignore
-        mermaid.init(undefined, wrapper);
+        mermaid.init({ htmlLabels: false }, wrapper);
       } catch (initErr) {
         // If init fails and looks like a parse error, treat it as such
         throw new Error(formatMermaidError(initErr));
