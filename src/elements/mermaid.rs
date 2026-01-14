@@ -106,13 +106,101 @@ static BROWSER: OnceCell<Browser> = OnceCell::new();
             }
         }
 
-        // Build a reasonably unique id for the task
-        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
-        let id = format!("genpdf-{}", now.as_millis());
-
-        // JSON-encode the diagram to avoid quoting/escaping issues in JS
+        // First, run a quick validation step inside the helper page to preserve
+        // the previous behavior where invalid Mermaid syntax produces a compilation
+        // error. We attempt a small JS snippet that uses either a helper-provided
+        // `validateDiagram` or falls back to `mermaid.parse`/`mermaid.render` to
+        // detect parse/compile errors without persisting a full render.
         let js_diagram = serde_json::to_string(diagram)
             .map_err(|e| Error::new(format!("Failed to JSON-encode diagram: {}", e), ErrorKind::Internal))?;
+
+        let validate_snippet = format!("(function(diagram){{
+            try {{
+                // If helper exposes a validation helper use it
+                if (window.__mermaidPool && typeof window.__mermaidPool.validateDiagram === 'function') {{
+                    const r = window.__mermaidPool.validateDiagram(diagram);
+                    return JSON.stringify(r);
+                }}
+
+                // Prefer mermaid.parse if available
+                if (typeof mermaid === 'object' && typeof mermaid.parse === 'function') {{
+                    mermaid.parse(diagram);
+                    return JSON.stringify({{ok:true}});
+                }}
+
+                // Fallback: try mermaid.render and catch exceptions
+                if (typeof mermaid === 'object' && typeof mermaid.render === 'function') {{
+                    try {{
+                        const maybe = mermaid.render('v'+Date.now(), diagram);
+                        // If it returned a promise, assume success for validation (render step will check later)
+                        if (maybe && typeof maybe.then === 'function') {{
+                            return JSON.stringify({{ok:true}});
+                        }}
+                        return JSON.stringify({{ok:true}});
+                    }} catch(e) {{
+                        return JSON.stringify({{ok:false, error: String(e)}});
+                    }}
+                }}
+
+                // If we don't know how to validate, assume success and let render step surface errors.
+                return JSON.stringify({{ok:true}});
+            }} catch(e) {{
+                return JSON.stringify({{ok:false, error: String(e)}});
+            }}
+        }})({});", js_diagram);
+
+        let val = tab
+            .evaluate(&validate_snippet, true)
+            .map_err(|e| Error::new(format!("Failed to run mermaid validation in helper: {}", e), ErrorKind::Internal))?;
+
+        let raw_val = val.value.unwrap_or_default().to_string();
+        let val_str = unescape(raw_val.trim_matches('\"')).unwrap_or_default();
+
+        // Try to interpret validation result. Expect JSON with {ok: bool, error?: string}
+        if val_str.trim().starts_with('{') {
+            if let Ok(vjson) = serde_json::from_str::<serde_json::Value>(&val_str) {
+                let ok = vjson.get("ok").and_then(|v| v.as_bool()).unwrap_or(true);
+                if !ok {
+                    let err_text = vjson.get("error").and_then(|v| v.as_str()).unwrap_or("Invalid mermaid syntax");
+                    return Err(Error::new(format!("Mermaid compile error: {}", err_text), ErrorKind::InvalidData));
+                }
+            } else if val_str.contains("error") {
+                return Err(Error::new(format!("Mermaid compile error (helper): {}", val_str), ErrorKind::InvalidData));
+            }
+        } else if val_str.to_lowercase().contains("error") {
+            return Err(Error::new(format!("Mermaid compile error: {}", val_str), ErrorKind::InvalidData));
+        }
+
+        // For backward compatibility ensure the embedded helper considers the
+        // diagram valid as well — some mermaid versions can be forgiving and the
+        // embedded helper was the historical source of validation. Run a light
+        // embedded validation; if it reports a compile error, abort with InvalidData.
+        let mermaid_js = include_str!("../../examples/helper/mermaid.min.js");
+        let html_payload = include_str!("../../examples/helper/index.html");
+
+        if let Ok(vtab) = browser.new_tab() {
+            // Use a data: uri version of the embedded helper to validate syntax
+            if vtab.navigate_to(&format!("data:text/html;charset=utf-8,{}", html_payload)).is_ok() {
+                let _ = vtab.wait_until_navigated();
+                let _ = vtab.evaluate(mermaid_js, false);
+                let js_call = format!("render({})", js_diagram);
+                if let Ok(data) = vtab.evaluate(&js_call, true) {
+                    let raw = data.value.unwrap_or_default().to_string();
+                    let svg = unescape(raw.trim_matches('\"')).unwrap_or_default();
+                    if svg.trim().starts_with('{') && svg.contains("\"error\"") {
+                        return Err(Error::new(format!("Mermaid compile error: {}", svg), ErrorKind::InvalidData));
+                    }
+
+                    if svg == "null" || svg.trim().is_empty() {
+                        return Err(Error::new(format!("Mermaid failed to compile diagram (embedded validation); raw: {:?}", raw), ErrorKind::InvalidData));
+                    }
+                }
+            }
+        }
+
+        // Build a reasonably unique id for the task and submit it
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
+        let id = format!("genpdf-{}", now.as_millis());
 
         let submit = format!("window.__mermaidPool.submitTask('{}', {})", id, js_diagram);
 
