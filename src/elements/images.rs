@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Ismael Theiskaa
 // Copyright (c) 2026 Ronan Le Meillat - SCTG Development
-// 
+//
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Licensed under the MIT License or the Apache License, Version 2.0
 
@@ -265,8 +265,9 @@ impl Image {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" data-dpi="720" width="100" height="50">...</svg>"#;
+    /// ```
+    /// use genpdfi_extended::elements::Image;
+    /// let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" data-dpi="720" width="100" height="50"></svg>"#;
     /// let dpi = Image::extract_dpi_from_svg(svg);
     /// assert_eq!(dpi, Some(720.0));
     /// ```
@@ -760,7 +761,10 @@ impl Element for Image {
 
         if image_bottom > available_height {
             // Debug info when an image doesn't fit
-            if std::env::var("RUST_LOG").unwrap_or_default().contains("debug") {
+            if std::env::var("RUST_LOG")
+                .unwrap_or_default()
+                .contains("debug")
+            {
                 eprintln!("Image overflow: effective_scale={:?} true_size={:?} bb_size={:?} top_left={:?} render_position={:?} image_bottom={:.1} available_height={:.1}",
                     effective_scale, true_size, bb_size, top_left, render_position, image_bottom.as_f32(), available_height.as_f32());
             }
@@ -824,7 +828,13 @@ impl Element for Image {
                         self.dpi,
                     );
                 } else {
-                    area.add_image(raster, render_position, effective_scale, self.rotation, self.dpi);
+                    area.add_image(
+                        raster,
+                        render_position,
+                        effective_scale,
+                        self.rotation,
+                        self.dpi,
+                    );
                 }
             }
         }
