@@ -55,7 +55,13 @@ mod inner {
         // Attempt to initialize the global Browser once. `get_or_try_init` returns a
         // reference if already initialized or runs the closure to create it.
         BROWSER.get_or_try_init(|| {
-            Browser::default().map_err(|e| {
+            Browser::new(
+                headless_chrome::LaunchOptionsBuilder::default()
+                    .headless(true)
+                    .build()
+                    .expect("launch options"),
+            )
+            .map_err(|e| {
                 Error::new(
                     format!("Failed to start headless chrome: {}", e),
                     ErrorKind::Internal,
@@ -65,16 +71,70 @@ mod inner {
         Ok(())
     }
 
-    fn get_browser() -> Result<&'static Browser, Error> {
+    pub fn get_browser() -> Result<&'static Browser, Error> {
         // Return a reference to the shared Browser, initializing it if necessary.
         // Using a &'static Browser makes it convenient to use across async calls and closures.
         BROWSER.get_or_try_init(|| {
-            Browser::default().map_err(|e| {
+            Browser::new(
+                headless_chrome::LaunchOptionsBuilder::default()
+                    .headless(true)
+                    .build()
+                    .expect("launch options"),
+            )
+            .map_err(|e| {
                 Error::new(
                     format!("Failed to start headless chrome: {}", e),
                     ErrorKind::Internal,
                 )
             })
+        })
+    }
+
+    // Path to the embedded helper HTML file written to a temp location and reused.
+    use headless_chrome::Tab;
+    use std::sync::Arc;
+    static HELPER_PATH: OnceCell<std::path::PathBuf> = OnceCell::new();
+    static POOL_TAB: OnceCell<Arc<Tab>> = OnceCell::new();
+
+    fn ensure_helper_file() -> Result<&'static std::path::PathBuf, Error> {
+        HELPER_PATH.get_or_try_init(|| {
+            let helper_html = include_str!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/mermaid_pool/dist/index.html"
+            ));
+            let tmp_dir = std::env::temp_dir();
+            let fname = format!("mermaid_helper_{}.html", std::process::id());
+            let helper_path = tmp_dir.join(fname);
+            std::fs::write(&helper_path, helper_html).map_err(|e| {
+                Error::new(
+                    format!(
+                        "Failed to write helper page to {}: {}",
+                        helper_path.display(),
+                        e
+                    ),
+                    ErrorKind::Internal,
+                )
+            })?;
+            Ok(helper_path.canonicalize().unwrap_or(helper_path))
+        })
+    }
+
+    fn get_pool_tab() -> Result<&'static Arc<Tab>, Error> {
+        let browser = get_browser()?;
+        let helper_path = ensure_helper_file()?;
+        POOL_TAB.get_or_try_init(|| {
+            let tab = browser.new_tab().map_err(|e| {
+                Error::new(format!("Failed to open tab: {}", e), ErrorKind::Internal)
+            })?;
+            tab.navigate_to(&format!("file://{}?pool=1", helper_path.display()))
+                .map_err(|e| {
+                    Error::new(format!("Failed to navigate: {}", e), ErrorKind::Internal)
+                })?;
+            tab.wait_until_navigated()
+                .map_err(|e| Error::new(format!("Navigation error: {}", e), ErrorKind::Internal))?;
+            // attempt to wait for metrics but do not fail if missing
+            let _ = tab.wait_for_element("#mermaid-metrics");
+            Ok(tab)
         })
     }
 
@@ -89,42 +149,40 @@ mod inner {
             // here so the rendering logic stays consistent. We embed both the `index.html`
             // which defines a `render` helper and the `mermaid.min.js` runtime so no external
             // network access is required during rendering.
-            let mermaid_js = include_str!("../../examples/helper/mermaid.min.js");
-            let html_payload = include_str!("../../examples/helper/index.html");
-
-            // Open a new tab and load the embedded helper page via a data URI. Using a data
-            // URI keeps the page self-contained and avoids I/O to disk or network.
-            let tab = browser.new_tab().map_err(|e| {
-                Error::new(format!("Failed to open tab: {}", e), ErrorKind::Internal)
-            })?;
-            tab.navigate_to(&format!("data:text/html;charset=utf-8,{}", html_payload))
-                .map_err(|e| {
-                    Error::new(format!("Failed to navigate: {}", e), ErrorKind::Internal)
-                })?;
-            // Wait for the navigation to finish so that the `render` helper is present on the page.
-            tab.wait_until_navigated()
-                .map_err(|e| Error::new(format!("Navigation error: {}", e), ErrorKind::Internal))?;
+            // Reuse a helper tab to avoid opening a new tab for every render.
+            // This improves stability and performance (see examples/mermaid_pool_proof_of_concept.rs).
+            let tab = get_pool_tab()?;
 
             // Inject the mermaid runtime into the page so it can compile the diagram string.
             // We pass `false` for the optional await flag because loading the runtime is
             // synchronous for our embedded script.
-            tab.evaluate(mermaid_js, false).map_err(|e| {
-                Error::new(
-                    format!("Failed to evaluate mermaid script: {}", e),
-                    ErrorKind::Internal,
-                )
-            })?;
+            // Pool helper page handles mermaid runtime; no need to inject runtime here.
 
-            // Call the helper `render` function defined in index.html. We must escape the diagram
-            // so that single quotes and other characters don't break the JS call. The helper
-            // returns a JSON-encoded string on success or an error object on failure.
-            let js_call = format!("render('{}')", escape(diagram));
-            let data = tab.evaluate(&js_call, true).map_err(|e| {
+            // Submit the diagram to the pool and wait for the Promise result synchronously.
+            let id = format!(
+                "rust-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis())
+                    .unwrap_or(0)
+            );
+            let js_diagram = match serde_json::to_string(diagram) {
+                Ok(s) => s,
+                Err(e) => {
+                    return Err(Error::new(
+                        format!("Failed to JSON-encode diagram: {}", e),
+                        ErrorKind::Internal,
+                    ));
+                }
+            };
+            let submit = format!("window.__mermaidPool.submitTask('{}', {})", id, js_diagram);
+            let data = tab.evaluate(&submit, true).map_err(|e| {
                 Error::new(format!("JS execution error: {}", e), ErrorKind::Internal)
             })?;
 
             let raw = data.value.unwrap_or_default().to_string();
-            // The returned value is a quoted string; unescape and strip surrounding quotes.
+            // The returned value may be quoted; unescape and strip surrounding quotes.
             let svg = unescape(raw.trim_matches('\"')).unwrap_or_default();
 
             // Detect whether the helper reported a JS-side error (we return a JSON error object
@@ -694,6 +752,14 @@ impl Mermaid {
     /// # }
     /// ```
     pub fn new<S: Into<String>>(diagram: S) -> Self {
+        // Attempt to initialize the global headless Chrome instance asynchronously so
+        // Mermaid users do not need to call `ensure_browser()` manually. We ignore any
+        // initialization errors here; they will surface during `render()` if Chrome is
+        // not available.
+        let _ = std::thread::spawn(|| {
+            let _ = inner::ensure_browser();
+        });
+
         Mermaid {
             diagram: diagram.into(),
             scale: 1.0,
@@ -710,6 +776,13 @@ impl Mermaid {
     /// Useful for examples that want to pre-check the environment before building the full PDF.
     pub fn ensure_browser() -> Result<(), crate::error::Error> {
         inner::ensure_browser()
+    }
+
+    /// Returns a reference to the shared headless Chrome `Browser` instance, initializing
+    /// it if necessary. Use this if you need to open tabs or interact directly with the
+    /// browser in integration tests or examples.
+    pub fn get_browser() -> Result<&'static headless_chrome::Browser, crate::error::Error> {
+        inner::get_browser()
     }
 
     /// Set alignment used when no absolute position is given.
@@ -833,10 +906,11 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "    Requires headless Chrome; enable and run manually in suitable environment"]
     fn invalid_syntax_returns_error() {
         let mut m = Mermaid::new("grph TB\na-->b");
         // Try to render; if browser is not available we skip like above
-        let mut r = Renderer::new(Size::new(200.0, 200.0), "t").expect("renderer");
+        let r = Renderer::new(Size::new(200.0, 200.0), "t").expect("renderer");
         let area = r.first_page().first_layer().area();
         let data = include_bytes!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -860,6 +934,7 @@ mod tests {
                 if s.contains("Failed to start headless chrome") {
                     return;
                 }
+                eprintln!("Received expected error: {}", s);
                 // For invalid mermaid syntax compile should fail. The helper may return
                 // a JS-side error object or a compilation failure message, accept both.
                 assert!(
