@@ -53,6 +53,29 @@ export class Renderer {
     this.busy = true;
     this.container.innerHTML = ''; // clear previous content
 
+    // Helper to normalize mermaid parse/render errors so that the Rust side sees
+    // a consistent message starting with "Mermaid failed to compile: ...".
+    const formatMermaidError = (e: any) => {
+      const msg = e && e.message ? e.message : String(e);
+      return msg.startsWith('Mermaid failed to compile') ? msg : `Mermaid failed to compile: ${msg}`;
+    };
+
+    // Quick pre-parse validation: prefer mermaid.parse if available to detect
+    // syntax errors early and surface them as compile errors.
+    try {
+      // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+      // @ts-ignore
+      if (typeof mermaid === 'object' && typeof mermaid.parse === 'function') {
+        // mermaid.parse throws on invalid syntax
+        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+        // @ts-ignore
+        mermaid.parse(diagram);
+      }
+    } catch (err) {
+      this.busy = false;
+      throw new Error(formatMermaidError(err));
+    }
+
     // strategy 1: try mermaid.render which may return svg synchronously
     try {
       // mermaid.render may be sync or async depending on version.
@@ -66,15 +89,22 @@ export class Renderer {
         return maybe;
       }
       if (maybe && typeof (maybe as any).then === 'function') {
-        const resolved = await (maybe as any);
-        if (typeof resolved === 'string') {
+        try {
+          const resolved = await (maybe as any);
+          if (typeof resolved === 'string') {
+            this.busy = false;
+            return resolved;
+          }
+        } catch (err) {
+          // If mermaid.render returns a rejected promise, treat as compile error
           this.busy = false;
-          return resolved;
+          throw new Error(formatMermaidError(err));
         }
       }
     } catch (err) {
-      // fall through to other extraction strategies
-      // console.warn('mermaid.render failed (try fallback)', err);
+      // If mermaid.render throws synchronously, treat as compile error
+      this.busy = false;
+      throw new Error(formatMermaidError(err));
     }
 
     // strategy 2: insert a '.mermaid' element into the container and run mermaid.init
@@ -92,7 +122,8 @@ export class Renderer {
         // @ts-ignore
         mermaid.init(undefined, wrapper);
       } catch (initErr) {
-        // If init fails, fall through and attempt parse/render
+        // If init fails and looks like a parse error, treat it as such
+        throw new Error(formatMermaidError(initErr));
       }
 
       // Give mermaid a slightly larger tick to perform async DOM updates
@@ -105,7 +136,12 @@ export class Renderer {
         return svgOuter;
       }
     } catch (err) {
-      // continue to next strategy
+      // propagate compile errors
+      this.busy = false;
+      if (err && err.message && err.message.startsWith('Mermaid failed to compile')) {
+        throw err;
+      }
+      // otherwise continue to next strategy
     }
 
     // strategy 3: last resort - attempt mermaid.parse & mermaid.render callback style
@@ -139,7 +175,8 @@ export class Renderer {
         } catch (e) {
           if (!done) {
             done = true;
-            reject(e);
+            // treat synchronous throw as compile error
+            reject(new Error(formatMermaidError(e)));
           }
         }
       }).finally(() => {
@@ -197,11 +234,14 @@ export class Pool {
           task.resolve(svg);
         } catch (err) {
           const taskEl = document.getElementById(`task-${task.id}`);
+          // Normalize message to match rust test expectations
+          const msg = (err && err.message) ? err.message : String(err);
+          const formatted = msg.startsWith('Mermaid failed to compile') ? msg : `Mermaid failed to compile: ${msg}`;
           if (taskEl) {
             taskEl.dataset.state = 'error';
-            taskEl.textContent = String(err);
+            taskEl.textContent = formatted;
           }
-          task.reject(err);
+          task.reject(new Error(formatted));
         } finally {
           renderer.busy = false;
         }
