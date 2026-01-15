@@ -21,6 +21,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             web_dir = fallback;
         } else {
             println!("cargo:warning=No web helper dir at {} or at {} -- skipping web build", web_dir.display(), fallback.display());
+            // If the mermaid feature is enabled, this is a hard error because the
+            // crate expects `mermaid_pool/dist/index.html` to exist at compile time.
+            if std::env::var("CARGO_FEATURE_MERMAID").is_ok() {
+                return Err(format!("Web helper directory not found at {} or {}; the 'mermaid' feature requires the `mermaid_pool` helper to be present. Add the `mermaid_pool` project or build it manually.", web_dir.display(), fallback.display()).into());
+            }
             return Ok(());
         }
     }
@@ -86,7 +91,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("cargo:warning=Web helper build completed.");
             }
             _ => {
-                println!("cargo:warning=npm not found in PATH; skipping web build (install Node/npm or run the helper build manually in {})", web_dir.display());
+                // npm not found: if the mermaid feature is enabled, fail fast with a helpful message
+                let mermaid_enabled = std::env::var("CARGO_FEATURE_MERMAID").is_ok();
+                if mermaid_enabled {
+                    return Err(format!("npm not found in PATH; the 'mermaid' feature requires the web helper build. Install Node/npm or run `cd {}` && `npm ci && npm run build` and retry.", web_dir.display()).into());
+                } else {
+                    println!("cargo:warning=npm not found in PATH; skipping web build (install Node/npm or run the helper build manually in {})", web_dir.display());
+                }
             }
         }
     } else {

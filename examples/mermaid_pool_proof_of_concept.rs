@@ -518,8 +518,10 @@ flowchart LR
 // (run `cd mermaid_pool && npm ci && npm run build` before building this example).
 // We include the file using `include_str!` and write it to a temporary file at
 // runtime so we can navigate to a file:// URL with query parameters.
+#[cfg(feature = "mermaid")]
 const EMBEDDED_HELPER_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/mermaid_pool/dist/index.html"));
 
+#[cfg(feature = "mermaid")]
 fn write_embedded_helper() -> Result<PathBuf, String> {
     let tmp_dir = std::env::temp_dir();
     let fname = format!("mermaid_pool_embedded_{}.html", std::process::id());
