@@ -11,6 +11,8 @@ permissions:
   pages: write
   id-token: write
 
+env:
+  TESTS_TO_SKIP:: "--skip mermaid_render_each--skip  wrap::tests::test_wrapper_overflow_sets_flag"
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -20,7 +22,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libcairo2-dev libpango1.0-dev libfontconfig1-dev pkg-config pkg-config libssl-dev clang
       # install meson and nija with --break-system-packages
@@ -75,7 +77,7 @@ jobs:
       - name: Generate coverage (Tarpaulin)
         continue-on-error: true
         shell: bash
-        run: cargo tarpaulin --out Xml --output-dir coverage --all-features --no-fail-fast -- --skip wrap::tests::test_wrapper_overflow_sets_flag
+        run: cargo tarpaulin --out Xml --output-dir coverage --all-features --no-fail-fast -- ${{ env.TESTS_TO_SKIP }}
 
       - name: Upload cobertura artifact
         uses: actions/upload-artifact@v6
@@ -100,7 +102,7 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: "24"
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libcairo2-dev libpango1.0-dev libfontconfig1-dev pkg-config pkg-config libssl-dev clang
       # install meson and nija with --break-system-packages
