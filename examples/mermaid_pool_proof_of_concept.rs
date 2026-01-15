@@ -25,7 +25,7 @@
 //! is not found; the build step above produces that file.
 
 // Copyright (c) 2026 Ronan Le Meillat - SCTG Development
-// 
+//
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Licensed under the MIT License or the Apache License, Version 2.0
 
@@ -519,15 +519,23 @@ flowchart LR
 // We include the file using `include_str!` and write it to a temporary file at
 // runtime so we can navigate to a file:// URL with query parameters.
 #[cfg(feature = "mermaid")]
-const EMBEDDED_HELPER_HTML: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/mermaid_pool/dist/index.html"));
+const EMBEDDED_HELPER_HTML: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/mermaid_pool/dist/index.html"
+));
 
 #[cfg(feature = "mermaid")]
 fn write_embedded_helper() -> Result<PathBuf, String> {
     let tmp_dir = std::env::temp_dir();
     let fname = format!("mermaid_pool_embedded_{}.html", std::process::id());
     let path = tmp_dir.join(fname);
-    std::fs::write(&path, EMBEDDED_HELPER_HTML)
-        .map_err(|e| format!("Failed to write embedded helper to {}: {}", path.display(), e))?;
+    std::fs::write(&path, EMBEDDED_HELPER_HTML).map_err(|e| {
+        format!(
+            "Failed to write embedded helper to {}: {}",
+            path.display(),
+            e
+        )
+    })?;
     Ok(path)
 }
 
@@ -561,7 +569,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tab.navigate_to(&format!("file://{}?pool={}", abs.display(), NB_POOLS))?;
     tab.wait_until_navigated()?;
 
-    eprintln!("Helper page loaded; rendering {} diagrams (pool={})...", MERMAID_BLOCKS.len(), NB_POOLS);
+    eprintln!(
+        "Helper page loaded; rendering {} diagrams (pool={})...",
+        MERMAID_BLOCKS.len(),
+        NB_POOLS
+    );
 
     // Wait for the helper page to initialize the pool and publish metrics
     match tab.wait_for_element("#mermaid-metrics") {
@@ -577,7 +589,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let id = format!("poc-{}-{}", i + 1, start.elapsed().as_millis());
 
         // Encode the diagram as a JSON string (properly escaped/unicode-safe)
-        let js_diagram = serde_json::to_string(diagram).map_err(|e| format!("Failed to JSON-encode diagram: {}", e))?;
+        let js_diagram = serde_json::to_string(diagram)
+            .map_err(|e| format!("Failed to JSON-encode diagram: {}", e))?;
         let submit = format!("window.__mermaidPool.submitTask('{}', {})", id, js_diagram);
 
         // Evaluate the submit which enqueues the task on the page side
@@ -608,7 +621,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("Diagram {} produced {} bytes", i + 1, svg.len());
         // For POC, save the svg content to a file per diagram. Make the path
         // relative to the crate root so it does not depend on the current CWD.
-        let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/output/mermaid_pool_poc");
+        let out_dir =
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("examples/output/mermaid_pool_poc");
         fs::create_dir_all(&out_dir)?;
         let out_path = out_dir.join(format!("mermaid_poc_{}.svg", i + 1));
         fs::write(&out_path, svg)?;

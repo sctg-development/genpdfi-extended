@@ -16,11 +16,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !web_dir.exists() {
         let fallback = manifest_dir.join("examples/mermaid_pool");
         if fallback.exists() {
-            println!("cargo:warning=Using legacy helper path {}", fallback.display());
+            println!(
+                "cargo:warning=Using legacy helper path {}",
+                fallback.display()
+            );
             // Use fallback for the remainder of the build script
             web_dir = fallback;
         } else {
-            println!("cargo:warning=No web helper dir at {} or at {} -- skipping web build", web_dir.display(), fallback.display());
+            println!(
+                "cargo:warning=No web helper dir at {} or at {} -- skipping web build",
+                web_dir.display(),
+                fallback.display()
+            );
             // If the mermaid feature is enabled, this is a hard error because the
             // crate expects `mermaid_pool/dist/index.html` to exist at compile time.
             if std::env::var("CARGO_FEATURE_MERMAID").is_ok() {
@@ -77,13 +84,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match Command::new("npm").arg("--version").output() {
             Ok(o) if o.status.success() => {
                 // run npm ci
-                let status = Command::new("npm").arg("ci").current_dir(&web_dir).status()?;
+                let status = Command::new("npm")
+                    .arg("ci")
+                    .current_dir(&web_dir)
+                    .status()?;
                 if !status.success() {
                     return Err(format!("`npm ci` failed in {}", web_dir.display()).into());
                 }
 
                 // run npm run build
-                let status = Command::new("npm").arg("run").arg("build").current_dir(&web_dir).status()?;
+                let status = Command::new("npm")
+                    .arg("run")
+                    .arg("build")
+                    .current_dir(&web_dir)
+                    .status()?;
                 if !status.success() {
                     return Err(format!("`npm run build` failed in {}", web_dir.display()).into());
                 }
