@@ -271,7 +271,7 @@ impl Image {
     /// let dpi = Image::extract_dpi_from_svg(svg);
     /// assert_eq!(dpi, Some(720.0));
     /// ```
-    fn extract_dpi_from_svg(svg_content: &str) -> Option<f32> {
+    pub fn extract_dpi_from_svg(svg_content: &str) -> Option<f32> {
         // Look for data-dpi="XXX" pattern in the SVG content
         if let Some(start) = svg_content.find("data-dpi=\"") {
             let search_str = &svg_content[start + 10..]; // Skip "data-dpi=\""

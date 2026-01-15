@@ -12,7 +12,8 @@ permissions:
   id-token: write
 
 env:
-  TESTS_TO_SKIP: "--skip mermaid_render_each --skip wrap::tests::test_wrapper_overflow_sets_flag"
+  # mermaid tests may fail on github runners due to missing fonts or other issues, test locally
+  TESTS_TO_SKIP: "--skip mermaid_render_each --skip wrap::tests::test_wrapper_overflow_sets_flag --skip elements::mermaid::tests::render_mermaid_smoke"
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
