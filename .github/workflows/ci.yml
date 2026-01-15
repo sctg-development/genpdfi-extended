@@ -73,7 +73,7 @@ jobs:
       - name: Run tests (all feature)
         env:
           CI_VISUAL_STRICT: "1"
-        run: cargo test --all-features --verbose
+        run: cargo test --all-features --verbose ${{ env.TESTS_TO_SKIP }}
 
       - name: Generate coverage (Tarpaulin)
         continue-on-error: true
