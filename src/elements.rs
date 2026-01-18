@@ -409,7 +409,408 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    #[cfg(feature = "images")]
+    fn image_overflow_then_paragraph_wrap_error() {
+        use crate::fonts::{FontCache, FontData, FontFamily};
+        use crate::Context;
+
+        // Prepare fonts and context
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
+        let fd = FontData::new(data.clone(), None).expect("FontData::new failed");
+        let family_data = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
+        let mut cache = FontCache::new(family_data);
+
+        // Create a very short page so the image will overflow the available height
+        let mut r = Renderer::new(Size::new(200.0, 5.0), "t").expect("renderer");
+        cache.load_pdf_fonts(&mut r).expect("load fonts");
+        let context = Context::new(cache);
+        let area = r.first_page().first_layer().area();
+
+        let svg = r#"
+        <svg id="mermaid-1768743983845" width="100%" xmlns="http://www.w3.org/2000/svg"
+    xmlns:xlink="http://www.w3.org/1999/xlink" class="flowchart" style="max-width: 819.40625px;"
+    viewBox="0 0 1638.8125 305.2" role="graphics-document document"
+    aria-roledescription="flowchart-v2">
+    <g transform="scale(2)">
+        <style>#mermaid-1768743983845{font-family:"trebuchet
+            ms",verdana,arial,sans-serif;font-size:16px;fill:#333;}@keyframes
+            edge-animation-frame{from{stroke-dashoffset:0;}}@keyframes
+            dash{to{stroke-dashoffset:0;}}#mermaid-1768743983845
+            .edge-animation-slow{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash
+            50s linear infinite;stroke-linecap:round;}#mermaid-1768743983845
+            .edge-animation-fast{stroke-dasharray:9,5!important;stroke-dashoffset:900;animation:dash
+            20s linear infinite;stroke-linecap:round;}#mermaid-1768743983845
+            .error-icon{fill:#552222;}#mermaid-1768743983845
+            .error-text{fill:#552222;stroke:#552222;}#mermaid-1768743983845
+            .edge-thickness-normal{stroke-width:1px;}#mermaid-1768743983845
+            .edge-thickness-thick{stroke-width:3.5px;}#mermaid-1768743983845
+            .edge-pattern-solid{stroke-dasharray:0;}#mermaid-1768743983845
+            .edge-thickness-invisible{stroke-width:0;fill:none;}#mermaid-1768743983845
+            .edge-pattern-dashed{stroke-dasharray:3;}#mermaid-1768743983845
+            .edge-pattern-dotted{stroke-dasharray:2;}#mermaid-1768743983845
+            .marker{fill:#333333;stroke:#333333;}#mermaid-1768743983845
+            .marker.cross{stroke:#333333;}#mermaid-1768743983845 svg{font-family:"trebuchet
+            ms",verdana,arial,sans-serif;font-size:16px;}#mermaid-1768743983845
+            p{margin:0;}#mermaid-1768743983845 .label{font-family:"trebuchet
+            ms",verdana,arial,sans-serif;color:#333;}#mermaid-1768743983845 .cluster-label
+            text{fill:#333;}#mermaid-1768743983845 .cluster-label
+            span{color:#333;}#mermaid-1768743983845 .cluster-label span
+            p{background-color:transparent;}#mermaid-1768743983845 .label
+            text,#mermaid-1768743983845 span{fill:#333;color:#333;}#mermaid-1768743983845 .node
+            rect,#mermaid-1768743983845 .node circle,#mermaid-1768743983845 .node
+            ellipse,#mermaid-1768743983845 .node polygon,#mermaid-1768743983845 .node
+            path{fill:#ECECFF;stroke:#9370DB;stroke-width:1px;}#mermaid-1768743983845 .rough-node
+            .label text,#mermaid-1768743983845 .node .label text,#mermaid-1768743983845 .image-shape
+            .label,#mermaid-1768743983845 .icon-shape
+            .label{text-anchor:middle;}#mermaid-1768743983845 .node .katex
+            path{fill:#000;stroke:#000;stroke-width:1px;}#mermaid-1768743983845 .rough-node
+            .label,#mermaid-1768743983845 .node .label,#mermaid-1768743983845 .image-shape
+            .label,#mermaid-1768743983845 .icon-shape
+            .label{text-align:center;}#mermaid-1768743983845
+            .node.clickable{cursor:pointer;}#mermaid-1768743983845 .root .anchor
+            path{fill:#333333!important;stroke-width:0;stroke:#333333;}#mermaid-1768743983845
+            .arrowheadPath{fill:#333333;}#mermaid-1768743983845 .edgePath
+            .path{stroke:#333333;stroke-width:2.0px;}#mermaid-1768743983845
+            .flowchart-link{stroke:#333333;fill:none;}#mermaid-1768743983845
+            .edgeLabel{background-color:rgba(232,232,232,
+            0.8);text-align:center;}#mermaid-1768743983845 .edgeLabel
+            p{background-color:rgba(232,232,232, 0.8);}#mermaid-1768743983845 .edgeLabel
+            rect{opacity:0.5;background-color:rgba(232,232,232, 0.8);fill:rgba(232,232,232,
+            0.8);}#mermaid-1768743983845 .labelBkg{background-color:rgba(232, 232, 232,
+            0.5);}#mermaid-1768743983845 .cluster
+            rect{fill:#ffffde;stroke:#aaaa33;stroke-width:1px;}#mermaid-1768743983845 .cluster
+            text{fill:#333;}#mermaid-1768743983845 .cluster span{color:#333;}#mermaid-1768743983845
+            div.mermaidTooltip{position:absolute;text-align:center;max-width:200px;padding:2px;font-family:"trebuchet
+            ms",verdana,arial,sans-serif;font-size:12px;background:hsl(80, 100%,
+            96.2745098039%);border:1px solid
+            #aaaa33;border-radius:2px;pointer-events:none;z-index:100;}#mermaid-1768743983845
+            .flowchartTitleText{text-anchor:middle;font-size:18px;fill:#333;}#mermaid-1768743983845
+            rect.text{fill:none;stroke-width:0;}#mermaid-1768743983845
+            .icon-shape,#mermaid-1768743983845 .image-shape{background-color:rgba(232,232,232,
+            0.8);text-align:center;}#mermaid-1768743983845 .icon-shape p,#mermaid-1768743983845
+            .image-shape p{background-color:rgba(232,232,232,
+            0.8);padding:2px;}#mermaid-1768743983845 .icon-shape rect,#mermaid-1768743983845
+            .image-shape rect{opacity:0.5;background-color:rgba(232,232,232,
+            0.8);fill:rgba(232,232,232, 0.8);}#mermaid-1768743983845
+            .label-icon{display:inline-block;height:1em;overflow:visible;vertical-align:-0.125em;}#mermaid-1768743983845
+            .node .label-icon
+            path{fill:currentColor;stroke:revert;stroke-width:revert;}#mermaid-1768743983845
+            :root{--mermaid-font-family:"trebuchet ms",verdana,arial,sans-serif;}</style>
+        <g>
+            <marker id="mermaid-1768743983845_flowchart-v2-pointEnd" class="marker flowchart-v2"
+                viewBox="0 0 10 10" refX="5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8"
+                markerHeight="8" orient="auto">
+                <path d="M 0 0 L 10 5 L 0 10 z" class="arrowMarkerPath"
+                    style="stroke-width: 1; stroke-dasharray: 1, 0;"></path>
+            </marker>
+            <marker id="mermaid-1768743983845_flowchart-v2-pointStart" class="marker flowchart-v2"
+                viewBox="0 0 10 10" refX="4.5" refY="5" markerUnits="userSpaceOnUse" markerWidth="8"
+                markerHeight="8" orient="auto">
+                <path d="M 0 5 L 10 10 L 10 0 z" class="arrowMarkerPath"
+                    style="stroke-width: 1; stroke-dasharray: 1, 0;"></path>
+            </marker>
+            <marker id="mermaid-1768743983845_flowchart-v2-circleEnd" class="marker flowchart-v2"
+                viewBox="0 0 10 10" refX="11" refY="5" markerUnits="userSpaceOnUse" markerWidth="11"
+                markerHeight="11" orient="auto">
+                <circle cx="5" cy="5" r="5" class="arrowMarkerPath"
+                    style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle>
+            </marker>
+            <marker id="mermaid-1768743983845_flowchart-v2-circleStart" class="marker flowchart-v2"
+                viewBox="0 0 10 10" refX="-1" refY="5" markerUnits="userSpaceOnUse" markerWidth="11"
+                markerHeight="11" orient="auto">
+                <circle cx="5" cy="5" r="5" class="arrowMarkerPath"
+                    style="stroke-width: 1; stroke-dasharray: 1, 0;"></circle>
+            </marker>
+            <marker id="mermaid-1768743983845_flowchart-v2-crossEnd"
+                class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="12" refY="5.2"
+                markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto">
+                <path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath"
+                    style="stroke-width: 2; stroke-dasharray: 1, 0;"></path>
+            </marker>
+            <marker id="mermaid-1768743983845_flowchart-v2-crossStart"
+                class="marker cross flowchart-v2" viewBox="0 0 11 11" refX="-1" refY="5.2"
+                markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto">
+                <path d="M 1,1 l 9,9 M 10,1 l -9,9" class="arrowMarkerPath"
+                    style="stroke-width: 2; stroke-dasharray: 1, 0;"></path>
+            </marker>
+            <g class="root">
+                <g class="clusters">
+                    <g class="cluster" id="Output" data-look="classic">
+                        <rect style="" x="597.8125" y="8" width="213.59375"
+                            height="136.5999984741211"></rect>
+                        <g class="cluster-label" transform="translate(679.671875, 8)">
+                            <foreignObject width="49.875" height="24">
+                                <div xmlns="http://www.w3.org/1999/xhtml"
+                                    style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;">
+                                    <span class="nodeLabel">
+                                        <p>Output</p>
+                                    </span>
+                                </div>
+                            </foreignObject>
+                        </g>
+                    </g>
+                    <g class="cluster" id="Filter" data-look="classic">
+                        <rect style="" x="350.578125" y="8" width="197.234375"
+                            height="136.5999984741211"></rect>
+                        <g class="cluster-label" transform="translate(394.6015625, 8)">
+                            <foreignObject width="109.1875" height="48">
+                                <div xmlns="http://www.w3.org/1999/xhtml"
+                                    style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;">
+                                    <span class="nodeLabel">
+                                        <p>Bandpass Filter<br />1800-2200 Hz</p>
+                                    </span>
+                                </div>
+                            </foreignObject>
+                        </g>
+                    </g>
+                    <g class="cluster" id="Input" data-look="classic">
+                        <rect style="" x="8" y="8" width="292.578125" height="136.5999984741211"></rect>
+                        <g class="cluster-label" transform="translate(135.6875, 8)">
+                            <foreignObject width="37.203125" height="24">
+                                <div xmlns="http://www.w3.org/1999/xhtml"
+                                    style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;">
+                                    <span class="nodeLabel">
+                                        <p>Input</p>
+                                    </span>
+                                </div>
+                            </foreignObject>
+                        </g>
+                    </g>
+                </g>
+                <g class="edgePaths">
+                    <path
+                        d="M275.578,76.3L279.745,76.3C283.911,76.3,292.245,76.3,300.578,76.3C308.911,76.3,317.245,76.3,325.578,76.3C333.911,76.3,342.245,76.3,349.911,76.3C357.578,76.3,364.578,76.3,368.078,76.3L371.578,76.3"
+                        id="L_SIG_BP_0"
+                        class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link"
+                        style=";" data-edge="true" data-et="edge" data-id="L_SIG_BP_0"
+                        data-points="W3sieCI6Mjc1LjU3ODEyNSwieSI6NzYuMjk5OTk5MjM3MDYwNTV9LHsieCI6MzAwLjU3ODEyNSwieSI6NzYuMjk5OTk5MjM3MDYwNTV9LHsieCI6MzI1LjU3ODEyNSwieSI6NzYuMjk5OTk5MjM3MDYwNTV9LHsieCI6MzUwLjU3ODEyNSwieSI6NzYuMjk5OTk5MjM3MDYwNTV9LHsieCI6Mzc1LjU3ODEyNSwieSI6NzYuMjk5OTk5MjM3MDYwNTV9XQ=="
+                        marker-end="url(#mermaid-1768743983845_flowchart-v2-pointEnd)"></path>
+                    <path
+                        d="M522.813,76.3L526.979,76.3C531.146,76.3,539.479,76.3,547.813,76.3C556.146,76.3,564.479,76.3,572.813,76.3C581.146,76.3,589.479,76.3,597.146,76.3C604.813,76.3,611.813,76.3,615.313,76.3L618.813,76.3"
+                        id="L_BP_OUT_0"
+                        class="edge-thickness-normal edge-pattern-solid edge-thickness-normal edge-pattern-solid flowchart-link"
+                        style=";" data-edge="true" data-et="edge" data-id="L_BP_OUT_0"
+                        data-points="W3sieCI6NTIyLjgxMjUsInkiOjc2LjI5OTk5OTIzNzA2MDU1fSx7IngiOjU0Ny44MTI1LCJ5Ijo3Ni4yOTk5OTkyMzcwNjA1NX0seyJ4Ijo1NzIuODEyNSwieSI6NzYuMjk5OTk5MjM3MDYwNTV9LHsieCI6NTk3LjgxMjUsInkiOjc2LjI5OTk5OTIzNzA2MDU1fSx7IngiOjYyMi44MTI1LCJ5Ijo3Ni4yOTk5OTkyMzcwNjA1NX1d"
+                        marker-end="url(#mermaid-1768743983845_flowchart-v2-pointEnd)"></path>
+                </g>
+                <g class="edgeLabels">
+                    <g class="edgeLabel">
+                        <g class="label" data-id="L_SIG_BP_0" transform="translate(0, 0)">
+                            <foreignObject width="0" height="0">
+                                <div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg"
+                                    style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;">
+                                    <span class="edgeLabel"></span>
+                                </div>
+                            </foreignObject>
+                        </g>
+                    </g>
+                    <g class="edgeLabel">
+                        <g class="label" data-id="L_BP_OUT_0" transform="translate(0, 0)">
+                            <foreignObject width="0" height="0">
+                                <div xmlns="http://www.w3.org/1999/xhtml" class="labelBkg"
+                                    style="display: table-cell; white-space: nowrap; line-height: 1.5; max-width: 200px; text-align: center;">
+                                    <span class="edgeLabel"></span>
+                                </div>
+                            </foreignObject>
+                        </g>
+                    </g>
+                </g>
+                <g class="nodes">
+                    <g class="node default" id="flowchart-SIG-0"
+                        transform="translate(154.2890625, 76.29999923706055)">
+                        <rect class="basic label-container" style="" x="-121.2890625"
+                            y="-33.29999923706055" width="242.578125" height="66.5999984741211"></rect>
+                        <g class="label" style="" transform="translate(0, -18.299999237060547)">
+                            <rect></rect>
+                            <g>
+                                <rect class="background" style="stroke: none"></rect>
+                                <text y="-10.1" style="">
+                                    <tspan class="text-outer-tspan" x="0" y="-0.1em" dy="1.1em">
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal">Mixed</tspan>
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal"> Signal</tspan>
+                                    </tspan>
+                                    <tspan class="text-outer-tspan" x="0" y="1em" dy="1.1em">
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal">100Hz</tspan>
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal"> +</tspan>
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal"> 2000Hz</tspan>
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal"> +</tspan>
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal"> 5000Hz</tspan>
+                                    </tspan>
+                                </text>
+                            </g>
+                        </g>
+                    </g>
+                    <g class="node default" id="flowchart-BP-1"
+                        transform="translate(449.1953125, 76.29999923706055)">
+                        <rect class="basic label-container" style="" x="-73.6171875"
+                            y="-33.29999923706055" width="147.234375" height="66.5999984741211"></rect>
+                        <g class="label" style="" transform="translate(0, -18.299999237060547)">
+                            <rect></rect>
+                            <g>
+                                <rect class="background" style="stroke: none"></rect>
+                                <text y="-10.1" style="">
+                                    <tspan class="text-outer-tspan" x="0" y="-0.1em" dy="1.1em">
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal">Butterworth</tspan>
+                                    </tspan>
+                                    <tspan class="text-outer-tspan" x="0" y="1em" dy="1.1em">
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal">4th</tspan>
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal"> order</tspan>
+                                    </tspan>
+                                </text>
+                            </g>
+                        </g>
+                    </g>
+                    <g class="node default" id="flowchart-OUT-2"
+                        transform="translate(704.609375, 76.29999923706055)">
+                        <rect class="basic label-container" style="" x="-81.796875"
+                            y="-33.29999923706055" width="163.59375" height="66.5999984741211"></rect>
+                        <g class="label" style="" transform="translate(0, -18.299999237060547)">
+                            <rect></rect>
+                            <g>
+                                <rect class="background" style="stroke: none"></rect>
+                                <text y="-10.1" style="">
+                                    <tspan class="text-outer-tspan" x="0" y="-0.1em" dy="1.1em">
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal">Filtered</tspan>
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal"> Signal</tspan>
+                                    </tspan>
+                                    <tspan class="text-outer-tspan" x="0" y="1em" dy="1.1em">
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal">2000Hz</tspan>
+                                        <tspan font-style="normal" class="text-inner-tspan"
+                                            font-weight="normal"> only</tspan>
+                                    </tspan>
+                                </text>
+                            </g>
+                        </g>
+                    </g>
+                </g>
+            </g>
+        </g>
+    </g>
+</svg>
+"#;
+        let mut img = crate::elements::Image::from_svg_string(svg).expect("parse svg");
+
+        // Render the image into the tiny area: should indicate `has_more` (image overflow)
+        let ires = img
+            .render(&context, area.clone(), Style::new())
+            .expect("image render");
+        assert!(
+            ires.has_more,
+            "expected image to overflow and request more space"
+        );
+
+        // Now attempt to render a paragraph with a long unbreakable word in the same (tiny) area
+        let mut p = Paragraph::default();
+        let long_word = "X".repeat(500);
+        p.push(&long_word);
+
+        match p.render(&context, area.clone(), Style::new()) {
+            Ok(_) => panic!("Expected paragraph render to fail with page overflow"),
+            Err(e) => {
+                use crate::error::ErrorKind;
+                assert!(matches!(e.kind(), ErrorKind::PageSizeExceeded));
+                let s = format!("{}", e);
+                assert!(
+                    s.contains("Page overflowed while trying to wrap a string"),
+                    "unexpected error: {}",
+                    s
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "images")]
+    fn mermaid_sanitized_svg_should_render_without_page_overflow() {
+        use crate::fonts::{FontCache, FontData, FontFamily};
+        use crate::Context;
+
+        // Prepare fonts and context
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
+        let fd = FontData::new(data.clone(), None).expect("FontData::new failed");
+        let family_data = FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
+        let mut cache = FontCache::new(family_data);
+
+        // Create a standard A4 renderer and load fonts
+        let mut r = Renderer::new(Size::new(210.0, 297.0), "mermaid_repro").expect("renderer");
+        cache.load_pdf_fonts(&mut r).expect("load fonts");
+        let context = Context::new(cache);
+        let area = r.first_page().first_layer().area();
+
+        // Sanitized SVG extracted from real failing run (truncated but representative)
+        let svg = concat!(
+            "<svg id=\"mermaid-1768743970152\" width=\"100%\" xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 1215.2188 1225.2344\">",
+            "<style>/* long inline CSS including :root and @keyframes */</style>",
+            "<g><g class=\"nodes\"><g class=\"node default\"><rect x=\"0\" y=\"0\" width=\"148.609375\" height=\"49\"></rect>",
+            "<g class=\"label\"><text><tspan>mag[0..N/2]</tspan></text></g></g>",
+            "<g class=\"cluster-label\"><foreignObject width=\"50.15625\" height=\"24\">",
+            "<div xmlns=\"http://www.w3.org/1999/xhtml\" style=\"white-space: nowrap; max-width: 200px;\"><p>Results</p></div>",
+            "</foreignObject></g></g></g></svg>"
+        );
+
+        // Parse image once
+        let img = crate::elements::Image::from_svg_string(svg).expect("parse svg");
+
+        // Build a layout that contains several copies of the SVG image followed by a paragraph
+        let mut layout = LinearLayout::vertical();
+        for _ in 0..6 {
+            layout.push(img.clone());
+        }
+        let mut p = Paragraph::default();
+        p.push("Trailing paragraph after several mermaid diagrams.");
+        layout.push(p);
+
+        // Render the layout - THIS SHOULD SUCCEED. If it fails with a PageSizeExceeded error,
+        // that indicates the upstream bug we observed in markdown2pdf.
+        match layout.render(&context, area.clone(), Style::new()) {
+            Ok(res) => {
+                // Rendering should succeed (may set has_more if more pages required, but it must not error)
+                assert!(res.size.height.as_f32() >= 0.0);
+            }
+            Err(e) => {
+                panic!(
+                    "mermaid SVG rendering caused an error (possible regression): {}",
+                    e
+                );
+            }
+        }
+    }
 }
+
+/// A single line of formatted text.}
 
 /// A single line of formatted text.
 ///
