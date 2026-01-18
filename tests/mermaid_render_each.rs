@@ -680,6 +680,7 @@ flowchart LR
 #[cfg(feature = "mermaid")]
 #[test]
 fn render_each_mermaid_block_to_pdf() {
+    // Run this test with `cargo test --features mermaid --test mermaid_render_each -- --nocapture`
     use std::fs;
     use std::path::PathBuf;
 
@@ -690,47 +691,52 @@ fn render_each_mermaid_block_to_pdf() {
     fs::create_dir_all(&out_dir).expect("create tests/output/mermaid_render_each dir");
 
     // Load font
-    let font_data = include_bytes!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/fonts/NotoSans-Regular.ttf"
-    ))
+    let font_datas = vec![
+        &include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))[..],
+        &include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/DejaVuSans.ttf"))[..],
+    ]
     .to_vec();
-    let fd = fonts::FontData::new(font_data, None).expect("font data");
-    let family = fonts::FontFamily {
-        regular: fd.clone(),
-        bold: fd.clone(),
-        italic: fd.clone(),
-        bold_italic: fd.clone(),
-    };
+    for (index, font_data) in font_datas.iter().enumerate() {
+        let fd = fonts::FontData::new(font_data.to_vec(), None).expect("font data");
+        let family = fonts::FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
 
-    // Simplified test: for each mermaid block, create a small document, push a heading and the Mermaid element,
-    // then render to a PDF file. `Mermaid::new` triggers browser initialization.
-    for (i, mermaid_block) in MERMAID_BLOCKS.iter().enumerate() {
-        // Save time for instrumentation
-        let start = std::time::Instant::now();
-        eprint!("Rendering Mermaid diagram {}... ", i + 1);
-        let mut doc = Document::new(family.clone());
-        doc.set_title(format!("Mermaid Diagram {}", i + 1));
-        doc.push(elements::Paragraph::new("").styled_string(
-            format!("Mermaid Diagram {}", i + 1),
-            style::Style::new().with_font_size(16).bold(),
-        ));
-        doc.push(elements::Paragraph::new(""));
+        // Simplified test: for each mermaid block, create a small document, push a heading and the Mermaid element,
+        // then render to a PDF file. `Mermaid::new` triggers browser initialization.
+        for (i, mermaid_block) in MERMAID_BLOCKS.iter().enumerate() {
+            // Save time for instrumentation
+            let start = std::time::Instant::now();
+            eprint!("Rendering Mermaid diagram {}... ", i + 1);
+            let mut doc = Document::new(family.clone());
+            doc.set_title(format!("Mermaid Diagram {}", i + 1));
+            doc.push(elements::Paragraph::new("").styled_string(
+                format!("Mermaid Diagram {}", i + 1),
+                style::Style::new().with_font_size(16).bold(),
+            ));
+            doc.push(elements::Paragraph::new(""));
 
-        // Construct the Mermaid element (this will attempt to init the browser asynchronously)
-        let mer = elements::Mermaid::new(*mermaid_block)
-            .with_alignment(Alignment::Center)
-            .with_auto_scale(2.0, 0.9);
-        doc.push(mer);
+            // Construct the Mermaid element (this will attempt to init the browser asynchronously)
+            let mer = elements::Mermaid::new(*mermaid_block)
+                .with_alignment(Alignment::Center)
+                .with_auto_scale(2.0, 0.9);
+            doc.push(mer);
 
-        let output_path = out_dir.join(format!("mermaid_diagram_{}.pdf", i + 1));
-        doc.render_to_file(&output_path).expect("render document");
-        assert!(
-            output_path.exists(),
-            "Output file {} should exist",
-            output_path.display()
-        );
-        let duration = start.elapsed();
-        eprintln!("done in {:.2?}", duration);
+            let output_path = out_dir.join(format!("mermaid_diagram_{}_{}.pdf", index + 1, i + 1));
+            doc.render_to_file(&output_path).expect("render document");
+            assert!(
+                output_path.exists(),
+                "Output file {} should exist",
+                output_path.display()
+            );
+            let duration = start.elapsed();
+            eprintln!("done in {:.2?}", duration);
+        }
     }
 }
