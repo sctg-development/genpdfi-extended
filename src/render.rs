@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Ismael Theiskaa
 // Copyright (c) 2026 Ronan Le Meillat - SCTG Development
-// 
+//
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Licensed under the MIT License or the Apache License, Version 2.0
 
@@ -26,7 +26,7 @@ use std::io;
 use std::ops;
 use std::rc;
 
-use crate::error::{Context as _, Error, ErrorKind};
+use crate::error::{Error, ErrorKind};
 use crate::fonts;
 use crate::style::{Color, LineStyle, Style};
 use crate::{Margins, Mm, Position, Rotation, Size};
@@ -34,7 +34,7 @@ use std::io::Write;
 
 // Postprocess helper to replace GENPDFI_CPK markers with TJ arrays using lopdf.
 fn postprocess_tj_impl(buf: &[u8]) -> Result<Vec<u8>, Error> {
-    use lopdf::content::{Content, Operation};
+    use lopdf::content::Content;
     use lopdf::{Dictionary, Document, Object, Stream};
 
     let mut doc = Document::load_mem(buf).map_err(|e| {
@@ -472,9 +472,7 @@ impl Renderer {
             printpdf::Op::BeginLayer {
                 layer_id: layer_id.clone(),
             },
-            printpdf::Op::EndLayer {
-                layer_id: layer_id.clone(),
-            },
+            printpdf::Op::EndLayer,
         ];
         let page = printpdf::PdfPage::new(size.width.into(), size.height.into(), ops);
         doc.pages.push(page);
@@ -526,9 +524,7 @@ impl Renderer {
             printpdf::Op::BeginLayer {
                 layer_id: layer_id.clone(),
             },
-            printpdf::Op::EndLayer {
-                layer_id: layer_id.clone(),
-            },
+            printpdf::Op::EndLayer,
         ];
         let page = printpdf::PdfPage::new(size.width.into(), size.height.into(), ops);
         self.doc.pages.push(page);
@@ -672,9 +668,7 @@ impl Renderer {
                 for op in layer.ops.clone().iter() {
                     new_ops.push(op.clone());
                 }
-                new_ops.push(printpdf::Op::EndLayer {
-                    layer_id: layer.layer_id.clone(),
-                });
+                new_ops.push(printpdf::Op::EndLayer);
             }
             if page_idx < self.doc.pages.len() {
                 self.doc.pages[page_idx].ops = new_ops;
@@ -1208,19 +1202,14 @@ impl<'p> Layer<'p> {
 
     fn set_font(&self, font: &IndirectFontRef, font_size: u8) {
         match font {
-            IndirectFontRef::Builtin(b) => {
-                self.data
-                    .borrow_mut()
-                    .ops
-                    .push(printpdf::Op::SetFontSizeBuiltinFont {
-                        size: printpdf::Pt(font_size as f32),
-                        font: *b,
-                    })
-            }
+            IndirectFontRef::Builtin(b) => self.data.borrow_mut().ops.push(printpdf::Op::SetFont {
+                font: printpdf::PdfFontHandle::Builtin(*b),
+                size: printpdf::Pt(font_size as f32),
+            }),
             IndirectFontRef::External(id) => {
-                self.data.borrow_mut().ops.push(printpdf::Op::SetFontSize {
+                self.data.borrow_mut().ops.push(printpdf::Op::SetFont {
+                    font: printpdf::PdfFontHandle::External(id.clone()),
                     size: printpdf::Pt(font_size as f32),
-                    font: id.clone(),
                 })
             }
         }
@@ -1248,10 +1237,12 @@ impl<'p> Layer<'p> {
         let mut it_pos = positions.into_iter();
         let mut it_cp = codepoints.into_iter();
         let mut it_ch = chars.into_iter();
-        let mut cpk: Vec<(i64, u16, char)> = Vec::new();
+        let mut glyphs: Vec<printpdf::Codepoint> = Vec::new();
         loop {
             match (it_pos.next(), it_cp.next(), it_ch.next()) {
-                (Some(p), Some(cp), Some(ch)) => cpk.push((p, cp, ch)),
+                (Some(p), Some(cp), Some(_ch)) => {
+                    glyphs.push(printpdf::Codepoint::new(cp, p as f32 / 1000.0));
+                }
                 (None, None, None) => break,
                 _ => {
                     // mismatched lengths; stop building — the inputs should ideally have the
@@ -1260,15 +1251,13 @@ impl<'p> Layer<'p> {
                 }
             }
         }
-        if !cpk.is_empty() {
-            // Emit the WriteCodepointsWithKerning op to record precise glyph positions and
-            // kerning. `cpk` is a vector of (offset, glyph id, char) tuples where `offset`
-            // is in thousandths of an em (following the convention used by the font kerning
-            // calculation in `Font`).
-            self.data
-                .borrow_mut()
-                .ops
-                .push(printpdf::Op::WriteCodepointsWithKerning { font, cpk });
+        if !glyphs.is_empty() {
+            // Emit the ShowText op with GlyphIds to record precise glyph positions and
+            // kerning. The glyphs vector contains Codepoint with glyph ID and offset
+            // (offset in thousandths of an em).
+            self.data.borrow_mut().ops.push(printpdf::Op::ShowText {
+                items: vec![printpdf::TextItem::GlyphIds(glyphs)],
+            });
         }
     }
     /// Transforms the given position that is relative to the upper left corner of the layer to a
@@ -1796,15 +1785,15 @@ impl<'f, 'p> TextSection<'f, 'p> {
                     .data
                     .borrow_mut()
                     .ops
-                    .push(printpdf::Op::WriteTextBuiltinFont { items, font: b });
+                    .push(printpdf::Op::ShowText { items });
             }
             IndirectFontRef::External(fid) => {
                 // Emit per-character text with explicit cursor moves. This avoids relying on
                 // glyph-id -> byte encodings which can become incorrect when the PDF font
                 // is subsetted and glyph indices are remapped. We compute precise cursor
                 // positions using font metrics + kerning and emit a SetTextCursor followed
-                // by a single-character WriteText for each glyph.
-                // Emit the full string as a single WriteText op and let the PDF viewer
+                // by a single-character ShowText for each glyph.
+                // Emit the full string as a single ShowText op and let the PDF viewer
                 // apply native kerning and glyph selection for the embedded font. This
                 // avoids glyph-id remapping issues and produces contiguous text suitable
                 // for extraction.
@@ -1816,10 +1805,7 @@ impl<'f, 'p> TextSection<'f, 'p> {
                     .data
                     .borrow_mut()
                     .ops
-                    .push(printpdf::Op::WriteText {
-                        items,
-                        font: fid.clone(),
-                    });
+                    .push(printpdf::Op::ShowText { items });
 
                 // Update aggregate offsets for the whole string
                 let text_width = style.text_width(self.font_cache, s);
@@ -1913,7 +1899,7 @@ impl<'f, 'p> TextSection<'f, 'p> {
                     .data
                     .borrow_mut()
                     .ops
-                    .push(printpdf::Op::WriteTextBuiltinFont { items, font: b });
+                    .push(printpdf::Op::ShowText { items });
             }
             IndirectFontRef::External(fid) => {
                 let kerning_positions = font.kerning(self.font_cache, text.chars());
@@ -1923,10 +1909,7 @@ impl<'f, 'p> TextSection<'f, 'p> {
                     .data
                     .borrow_mut()
                     .ops
-                    .push(printpdf::Op::WriteText {
-                        items,
-                        font: fid.clone(),
-                    });
+                    .push(printpdf::Op::ShowText { items });
 
                 // Update aggregate offsets for the whole string
                 self.current_x_offset += text_width;
@@ -2567,18 +2550,23 @@ mod tests {
         // per-character WriteText ops. Validate the emitted characters and kerning
         // where applicable.
         let layer_ops = area.layer.data.borrow().ops.clone();
-        let mut found_cpk = None;
+        let mut found_glyph_ids = None;
         let mut written_chars: Vec<char> = Vec::new();
 
         for op in layer_ops.iter() {
-            if let printpdf::Op::WriteCodepointsWithKerning { font: _, cpk } = op {
-                found_cpk = Some(cpk.clone());
-            }
-            if let printpdf::Op::WriteText { items, font: _ } = op {
-                for it in items.iter() {
-                    if let printpdf::TextItem::Text(t) = it {
-                        for ch in t.chars() {
-                            written_chars.push(ch);
+            if let printpdf::Op::ShowText { items } = op {
+                for item in items.iter() {
+                    match item {
+                        printpdf::TextItem::GlyphIds(glyphs) => {
+                            found_glyph_ids = Some(glyphs.clone());
+                        }
+                        printpdf::TextItem::Text(t) => {
+                            for ch in t.chars() {
+                                written_chars.push(ch);
+                            }
+                        }
+                        printpdf::TextItem::Offset(_) => {
+                            // Offset items are used for spacing adjustments
                         }
                     }
                 }
@@ -2586,26 +2574,25 @@ mod tests {
         }
 
         let expected_chars: Vec<char> = s.chars().collect();
-        if let Some(cpk) = found_cpk {
-            // Validate cpk content
+        if let Some(glyphs) = found_glyph_ids {
+            // Validate glyph content
             let font = style.font(&cache);
-            let kerning_positions: Vec<i64> = font
+            let kerning_positions: Vec<f32> = font
                 .kerning(&cache, s.chars())
                 .into_iter()
-                .map(|p| (-p * 1000.0) as i64)
+                .map(|p| -p * 1000.0)
                 .collect();
             let codepoints: Vec<u16> = font.glyph_ids(&cache, s.chars());
-            assert_eq!(cpk.len(), expected_chars.len());
-            for (i, (p, cp, ch)) in cpk.iter().enumerate() {
-                assert_eq!(*p, kerning_positions[i]);
-                assert_eq!(*cp, codepoints[i]);
-                assert_eq!(*ch, expected_chars[i]);
+            assert_eq!(glyphs.len(), expected_chars.len());
+            for (i, glyph) in glyphs.iter().enumerate() {
+                assert_eq!(glyph.gid, codepoints[i]);
+                assert_eq!(glyph.offset, kerning_positions[i]);
             }
         } else {
             // Validate per-character emission produced the expected string
             assert_eq!(
                 written_chars, expected_chars,
-                "expected per-character WriteText to emit the same chars"
+                "expected per-character ShowText to emit the same chars"
             );
         }
 
@@ -2685,8 +2672,8 @@ mod tests {
             if sdebug.contains("TJ")
                 || sdebug.contains("Tj")
                 || sdebug.contains(s)
-                || sdebug.contains("WriteText")
-                || sdebug.contains("WriteTextBuiltinFont")
+                || sdebug.contains("ShowText")
+                || sdebug.contains("GlyphIds")
             {
                 found = true;
                 break;
@@ -2752,12 +2739,15 @@ mod tests {
                 cursors_x_mm.push(x_mm);
                 cursors_y_mm.push(y_mm);
             }
-            if let printpdf::Op::WriteText { items, font: _ } = op {
+            if let printpdf::Op::ShowText { items } = op {
                 for it in items.iter() {
-                    if let printpdf::TextItem::Text(t) = it {
-                        for ch in t.chars() {
-                            emitted_chars.push(ch);
+                    match it {
+                        printpdf::TextItem::Text(t) => {
+                            for ch in t.chars() {
+                                emitted_chars.push(ch);
+                            }
                         }
+                        _ => {}
                     }
                 }
             }
@@ -2765,33 +2755,36 @@ mod tests {
 
         // Sanity checks
         let expected_chars: Vec<char> = s.chars().collect();
-        // Accept either a WriteCodepointsWithKerning with correct length or
-        // per-character WriteText emissions matching the string length. This keeps the
+        // Accept either a ShowText with GlyphIds with correct length or
+        // per-character ShowText emissions matching the string length. This keeps the
         // test robust while we prefer the per-character path that avoids glyph-id
         // remapping issues during subsetting.
         let layer_ops = area.layer.data.borrow().ops.clone();
-        let mut found_cpk_len = None;
-        let mut write_text_single_chars = 0usize;
+        let mut found_glyph_ids_len = None;
+        let mut show_text_single_chars = 0usize;
         for op in layer_ops.iter() {
-            if let printpdf::Op::WriteCodepointsWithKerning { font: _, cpk } = op {
-                found_cpk_len = Some(cpk.len());
-            }
-            if let printpdf::Op::WriteText { items, font: _ } = op {
-                for it in items.iter() {
-                    if let printpdf::TextItem::Text(t) = it {
-                        // count single-character WriteText ops emitted by our per-char path
-                        if t.chars().count() == 1 {
-                            write_text_single_chars += 1;
+            if let printpdf::Op::ShowText { items } = op {
+                for item in items.iter() {
+                    match item {
+                        printpdf::TextItem::GlyphIds(glyphs) => {
+                            found_glyph_ids_len = Some(glyphs.len());
                         }
+                        printpdf::TextItem::Text(t) => {
+                            // count single-character ShowText ops emitted by our per-char path
+                            if t.chars().count() == 1 {
+                                show_text_single_chars += 1;
+                            }
+                        }
+                        printpdf::TextItem::Offset(_) => {}
                     }
                 }
             }
         }
         assert!(
-            found_cpk_len == Some(expected_chars.len())
-            || write_text_single_chars == expected_chars.len()
+            found_glyph_ids_len == Some(expected_chars.len())
+            || show_text_single_chars == expected_chars.len()
             || emitted_chars == expected_chars,
-            "Expected either WriteCodepointsWithKerning with same number of glyphs as the string, per-character WriteText ops matching string length, or a single WriteText emitting the full string"
+            "Expected either ShowText with GlyphIds containing same number of glyphs as the string, per-character ShowText ops matching string length, or a single ShowText emitting the full string"
         );
 
         // Ensure there is at least one SetTextCursor (initial cursor point is fine)

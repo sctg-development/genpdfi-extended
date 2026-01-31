@@ -433,7 +433,7 @@ impl Image {
         Self::from_svg_string(&content)
     }
 
-    fn from_image_reader<R>(reader: image::io::Reader<R>) -> Result<Self, Error>
+    fn from_image_reader<R>(reader: image::ImageReader<R>) -> Result<Self, Error>
     where
         R: std::io::BufRead,
         R: std::io::Read,
@@ -454,13 +454,13 @@ impl Image {
         R: std::io::Read,
         R: std::io::Seek,
     {
-        Self::from_image_reader(image::io::Reader::new(reader))
+        Self::from_image_reader(image::ImageReader::new(reader))
     }
 
     /// Creates a new image by reading from the given path.
     pub fn from_path(path: impl AsRef<path::Path>) -> Result<Self, Error> {
         let path = path.as_ref();
-        let reader = image::io::Reader::open(path)
+        let reader = image::ImageReader::open(path)
             .with_context(|| format!("Could not read image from path {}", path.display()))?;
         Self::from_image_reader(reader)
     }

@@ -933,6 +933,15 @@ impl Paragraph {
         }
     }
 
+    /// Returns a simple concatenation of the paragraph strings (useful for instrumentation).
+    pub fn text_content(&self) -> String {
+        let mut s = String::new();
+        for t in &self.text {
+            s.push_str(&t.s);
+        }
+        s
+    }
+
     /// Sets the alignment of this paragraph.
     pub fn set_alignment(&mut self, alignment: Alignment) {
         self.alignment = alignment;
@@ -1127,6 +1136,11 @@ impl Break {
         Break {
             lines: lines.into(),
         }
+    }
+
+    /// Returns the number of lines for this break.
+    pub fn lines(&self) -> f32 {
+        self.lines
     }
 }
 

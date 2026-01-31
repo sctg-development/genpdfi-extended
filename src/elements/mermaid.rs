@@ -12,20 +12,20 @@
 //! API usage but do not perform rendering to avoid requiring Chrome in doctests.
 
 #[cfg(feature = "mermaid")]
-use crate::{Alignment, Position, Size};
+use crate::{Alignment, Position};
 
 #[cfg(feature = "mermaid")]
 mod inner {
     use std::fmt::Display;
 
-    use escape_string::escape;
+
     use headless_chrome::Browser;
     use unescape::unescape;
 
-    use crate::error::{Context as _, Error, ErrorKind};
+    use crate::error::{Error, ErrorKind};
     use crate::render;
     use crate::style::Style;
-    use crate::{Alignment, Context, Element, Position, RenderResult, Size};
+    use crate::{Context, Element, RenderResult, Size};
 
     use super::Mermaid;
 
@@ -600,7 +600,15 @@ mod inner {
                 if let Some(link) = &self.link {
                     parsed_img = parsed_img.with_link(link.clone());
                 }
-                return parsed_img.render(context, area, style);
+                let mut result = parsed_img.render(context, area, style)?;
+                // Apply scaling factor to the result size
+                if (used_scale - 1.0).abs() >= f32::EPSILON {
+                    result.size = Size::new(
+                        result.size.width,
+                        result.size.height.as_f32() * used_scale,
+                    );
+                }
+                return Ok(result);
             }
 
             // Otherwise construct a (possibly scaled) SVG string and parse it as before.
@@ -644,6 +652,13 @@ mod inner {
                     // Add SVG source to RenderResult for reference
                     let mut res = result?;
                     res.svg = Some(sanitized);
+                    // Apply scaling factor to the result size
+                    if (used_scale - 1.0).abs() >= f32::EPSILON {
+                        res.size = Size::new(
+                            res.size.width,
+                            res.size.height.as_f32() * used_scale,
+                        );
+                    }
                     Ok(res)
                 }
                 Err(_san_err) => {
@@ -656,7 +671,15 @@ mod inner {
                             if let Some(link) = &self.link {
                                 img = img.with_link(link.clone());
                             }
-                            img.render(context, area, style)
+                            let mut result = img.render(context, area, style)?;
+                            // Apply scaling factor to the result size
+                            if (used_scale - 1.0).abs() >= f32::EPSILON {
+                                result.size = Size::new(
+                                    result.size.width,
+                                    result.size.height.as_f32() * used_scale,
+                                );
+                            }
+                            Ok(result)
                         }
                         Err(err) => {
                             // Parsing failed even for raw SVG: if debugging is enabled, dump the raw
@@ -853,7 +876,7 @@ mod tests {
     use super::*;
     use crate::render::Renderer;
     use crate::style::Style;
-    use crate::Element;
+    use crate::{Element, Size};
 
     #[test]
     fn create_mermaid_element_works() {

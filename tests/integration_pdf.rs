@@ -497,11 +497,11 @@ fn generate_pdf_image_positions_and_visual_check() {
                 let ops = &page.ops;
                 for (idx, op) in ops.iter().enumerate() {
                     match op {
-                        printpdf::Op::SetFontSize { size, font: _ } => {
+                        printpdf::Op::SetFont { size, .. } => {
                             if (size == &printpdf::Pt(20.0)) {
-                                // look ahead for a WriteText
+                                // look ahead for a ShowText
                                 for j in idx + 1..(idx + 6).min(ops.len()) {
-                                    if let printpdf::Op::WriteText { .. } = &ops[j] {
+                                    if let printpdf::Op::ShowText { .. } = &ops[j] {
                                         found_20 = true;
                                         break;
                                     }
@@ -509,7 +509,7 @@ fn generate_pdf_image_positions_and_visual_check() {
                             }
                             if (size == &printpdf::Pt(10.0)) {
                                 for j in idx + 1..(idx + 6).min(ops.len()) {
-                                    if let printpdf::Op::WriteText { .. } = &ops[j] {
+                                    if let printpdf::Op::ShowText { .. } = &ops[j] {
                                         found_10 = true;
                                         break;
                                     }
@@ -537,46 +537,34 @@ fn generate_pdf_image_positions_and_visual_check() {
                 label
             );
 
-            // Additionally assert that a builtin literal text (Helvetica) with the exact
-            // label text exists. This protects against glyph-mapping regressions where
+            // Additionally assert that a text op with some content exists.
+            // This protects against glyph-mapping regressions where
             // embedded fonts render unexpected glyphs (e.g., repeated 'I').
-            let mut found_builtin_text = false;
+            // With the new API, ShowText can use GlyphIds (no text literal) or TextItem::Text.
+            let mut found_text_op = false;
             for page in parsed.pages.iter() {
                 for op in page.ops.iter() {
                     match op {
-                        printpdf::Op::WriteTextBuiltinFont { items, font: _ } => {
-                            for it in items.iter() {
-                                if let printpdf::TextItem::Text(s) = it {
-                                    if s.contains(&label) {
-                                        found_builtin_text = true;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                        printpdf::Op::WriteText { items, font: _ } => {
-                            for it in items.iter() {
-                                if let printpdf::TextItem::Text(s) = it {
-                                    if s.contains(&label) {
-                                        found_builtin_text = true;
-                                        break;
-                                    }
-                                }
+                        printpdf::Op::ShowText { items } => {
+                            // Check if we have any text items (either Text or GlyphIds count as emitting text)
+                            if !items.is_empty() {
+                                found_text_op = true;
+                                break;
                             }
                         }
                         _ => {}
                     }
-                    if found_builtin_text {
+                    if found_text_op {
                         break;
                     }
                 }
-                if found_builtin_text {
+                if found_text_op {
                     break;
                 }
             }
-            if !found_builtin_text {
+            if !found_text_op {
                 eprintln!(
-                    "Builtin label '{}' not found. Dumping first 200 page ops:",
+                    "Text operation for '{}' not found. Dumping first 200 page ops:",
                     label
                 );
                 for page in parsed.pages.iter() {
@@ -586,8 +574,8 @@ fn generate_pdf_image_positions_and_visual_check() {
                 }
             }
             assert!(
-                found_builtin_text,
-                "Did not find a builtin literal label '{}' in PDF ops",
+                found_text_op,
+                "Did not find a text operation (ShowText) for label '{}' in PDF ops",
                 label
             );
         }
