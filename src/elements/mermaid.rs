@@ -98,29 +98,78 @@ mod inner {
             let _ = tab_arc.clone(); // ensure we at least hold a clone so dropping our clone reduces refs
         }
 
-        // If there is a running Browser, try to obtain its process id and kill it.
+        // If there is a running Browser, try to obtain its process id and kill it using sysinfo
         if let Some(browser) = BROWSER.get() {
             if let Some(pid) = browser.get_process_id() {
-                // Try gentle TERM then KILL if needed
-                let _ = std::process::Command::new("sh")
-                    .arg("-c")
-                    .arg(format!("kill -TERM {} 2>/dev/null || true", pid))
-                    .status();
+                use sysinfo::{Pid, ProcessesToUpdate, Signal, System};
 
-                // Wait for process to disappear (poll)
+                let target = Pid::from(pid as usize);
+                let mut sys = System::new_all();
+                // Refresh processes so we have up-to-date info
+                sys.refresh_processes(ProcessesToUpdate::Some(&[target]), true);
+
+                // Collect main process and any direct children to attempt termination.
+                let mut to_kill: Vec<Pid> = Vec::new();
+                if sys.process(target).is_some() {
+                    to_kill.push(target);
+                }
+                for (p, proc_) in sys.processes() {
+                    if let Some(parent) = proc_.parent() {
+                        if parent == target {
+                            to_kill.push(*p);
+                        }
+                    }
+                }
+
+                // Try gentle TERM on all candidates first, then poll for exit. If still alive, send KILL.
+                for p in &to_kill {
+                    if let Some(proc_) = sys.process(*p) {
+                        let _ = proc_.kill_with(Signal::Term);
+                    }
+                }
+
+                // Wait for processes to disappear (poll)
                 let mut tries = 0u32;
                 while tries < 50 {
-                    let still = std::process::Command::new("sh")
-                        .arg("-c")
-                        .arg(format!("ps -p {} -o pid= || true", pid))
-                        .output();
-                    if let Ok(o) = still {
-                        if o.stdout.is_empty() {
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                    sys.refresh_processes(ProcessesToUpdate::Some(&to_kill), true);
+                    let mut any_alive = false;
+                    for p in &to_kill {
+                        if sys.process(*p).is_some() {
+                            any_alive = true;
                             break;
                         }
                     }
+                    if !any_alive {
+                        break;
+                    }
                     tries += 1;
+                }
+
+                // Force kill any remaining processes
+                sys.refresh_processes(ProcessesToUpdate::Some(&to_kill), true);
+                for p in &to_kill {
+                    if let Some(proc_) = sys.process(*p) {
+                        let _ = proc_.kill(); // sends strongest supported signal
+                    }
+                }
+
+                // Final short poll
+                let mut tries = 0u32;
+                while tries < 20 {
                     std::thread::sleep(std::time::Duration::from_millis(100));
+                    sys.refresh_processes(ProcessesToUpdate::Some(&to_kill), true);
+                    let mut any_alive = false;
+                    for p in &to_kill {
+                        if sys.process(*p).is_some() {
+                            any_alive = true;
+                            break;
+                        }
+                    }
+                    if !any_alive {
+                        break;
+                    }
+                    tries += 1;
                 }
             }
         }
