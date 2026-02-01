@@ -1,5 +1,5 @@
 // Copyright (c) 2026 Ronan Le Meillat - SCTG Development
-// 
+//
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Licensed under the MIT License or the Apache License, Version 2.0
 
@@ -37,7 +37,10 @@ fn main() {
                 }
                 Err(e) => {
                     let dur = browser_start.elapsed();
-                    eprintln!("Headless Chrome is not available or failed to start after {:.3?}: {}", dur, e);
+                    eprintln!(
+                        "Headless Chrome is not available or failed to start after {:.3?}: {}",
+                        dur, e
+                    );
                     eprintln!("Install Chrome / Chromium and ensure it's runnable in headless mode to run this example.");
                     return;
                 }
@@ -51,7 +54,11 @@ fn main() {
         fs::create_dir_all(&out_dir).expect("create examples/output dir");
 
         // Load font
-        let font_data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+        let font_data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
 
         let fd = fonts::FontData::new(font_data, None).expect("font data");
         let family = fonts::FontFamily {
@@ -66,25 +73,29 @@ fn main() {
         doc.set_title("Mermaid Stress Test - Multiple Diagrams");
 
         // Title
-        doc.push(
-            elements::Paragraph::new("")
-                .styled_string(
-                    "Mermaid Stress Test: Multiple Diagrams",
-                    style::Style::new().with_font_size(16).bold(),
-                ),
-        );
-        doc.push(elements::Paragraph::new("This example renders several simple Mermaid diagrams."));
+        doc.push(elements::Paragraph::new("").styled_string(
+            "Mermaid Stress Test: Multiple Diagrams",
+            style::Style::new().with_font_size(16).bold(),
+        ));
+        doc.push(elements::Paragraph::new(
+            "This example renders several simple Mermaid diagrams.",
+        ));
         doc.push(elements::Paragraph::new(""));
 
         // A set of simple diagrams to render
         let diagrams = vec![
-            ("1. Simple Flow", r#"---
+            (
+                "1. Simple Flow",
+                r#"---
 title: Node
 ---
 flowchart LR
     id
-"#),
-            ("2. Left-to-right", r#"---
+"#,
+            ),
+            (
+                "2. Left-to-right",
+                r#"---
 config:
   flowchart:
     htmlLabels: false
@@ -95,13 +106,19 @@ flowchart LR
     Line 2
     Line 3`"]
     markdown --> newLines
-"#),
-            ("3. Sequence", r#"sequenceDiagram
+"#,
+            ),
+            (
+                "3. Sequence",
+                r#"sequenceDiagram
     Alice->>John: Hello John, how are you?
     John-->>Alice: Great!
     Alice-)John: See you later!
-"#),
-            ("4. Class", r#"---
+"#,
+            ),
+            (
+                "4. Class",
+                r#"---
 title: Animal example
 ---
 classDiagram
@@ -127,8 +144,11 @@ classDiagram
         +bool is_wild
         +run()
     }
-"#),
-            ("5. State", r#"---
+"#,
+            ),
+            (
+                "5. State",
+                r#"---
 title: Simple sample
 ---
 stateDiagram-v2
@@ -139,13 +159,19 @@ stateDiagram-v2
     Moving --> Still
     Moving --> Crash
     Crash --> [*]
-"#),
-            ("6. Pie", r#"pie title Pets adopted by volunteers
+"#,
+            ),
+            (
+                "6. Pie",
+                r#"pie title Pets adopted by volunteers
     "Dogs" : 386
     "Cats" : 85
     "Rats" : 15
-"#),
-            ("7. Gantt", r#"gantt
+"#,
+            ),
+            (
+                "7. Gantt",
+                r#"gantt
     dateFormat  YYYY-MM-DD
     title       Adding GANTT diagram functionality to mermaid
     excludes    weekends
@@ -175,8 +201,11 @@ stateDiagram-v2
     Describe gantt syntax               :after doc1, 3d
     Add gantt diagram to demo page      :20h
     Add another diagram to demo page    :48h
-"#),
-            ("8. Mindmap", r#"mindmap
+"#,
+            ),
+            (
+                "8. Mindmap",
+                r#"mindmap
   root((System Features))
     Signal Processing
       Real-time FFT
@@ -197,8 +226,11 @@ stateDiagram-v2
       Python integration
       Plugin drivers
       Hot-reload config
-      REST API"#),
-            ("9. Git graph", r#"---
+      REST API"#,
+            ),
+            (
+                "9. Git graph",
+                r#"---
 title: Example Git diagram
 ---
 gitGraph
@@ -212,15 +244,19 @@ gitGraph
    merge develop
    commit
    commit
-"#),
-            ("10. Timeline", r#"timeline
+"#,
+            ),
+            (
+                "10. Timeline",
+                r#"timeline
     title History of Social Media Platform
     2002 : LinkedIn
     2004 : Facebook
          : Google
     2005 : YouTube
     2006 : Twitter
-"#),
+"#,
+            ),
         ];
 
         let queue_start = Instant::now();
@@ -230,24 +266,31 @@ gitGraph
         for (idx, (title, diagram)) in diagrams.iter().enumerate() {
             doc.push(elements::Paragraph::new(""));
             doc.push(
-                elements::Paragraph::new("").styled_string(
-                    *title,
-                    style::Style::new().with_font_size(11).bold(),
-                ),
+                elements::Paragraph::new("")
+                    .styled_string(*title, style::Style::new().with_font_size(11).bold()),
             );
-            doc.push(elements::Paragraph::new(format!("Mermaid source: {}", diagram)));
+            doc.push(elements::Paragraph::new(format!(
+                "Mermaid source: {}",
+                diagram
+            )));
 
             // Queue the Mermaid element for rendering. We intentionally do not pre-validate
             // here because opening a new tab and navigating/reloading the helper page for each
             // validation is expensive; rendering will occur later when the document is rendered.
             // This avoids double compilation and significantly reduces runtime for many diagrams.
-            let mer = elements::Mermaid::new(*diagram).with_alignment(Alignment::Center).with_scale(2.0);
+            let mer = elements::Mermaid::new(*diagram)
+                .with_alignment(Alignment::Center)
+                .with_scale(2.0);
             doc.push(mer);
             println!("✓ Diagram {} queued for rendering", idx + 1);
             success_count += 1;
         }
 
-        eprintln!("Queued {} diagrams in {:.3?}", success_count, queue_start.elapsed());
+        eprintln!(
+            "Queued {} diagrams in {:.3?}",
+            success_count,
+            queue_start.elapsed()
+        );
 
         // Summary
         doc.push(elements::Paragraph::new(""));
@@ -255,7 +298,10 @@ gitGraph
             "=== TEST SUMMARY ===",
             style::Style::new().with_font_size(12).bold(),
         ));
-        doc.push(elements::Paragraph::new(format!("Total diagrams: {}", success_count)));
+        doc.push(elements::Paragraph::new(format!(
+            "Total diagrams: {}",
+            success_count
+        )));
 
         // Output document
         let output_path = out_dir.join("mermaid_stress_test.pdf");
@@ -264,7 +310,10 @@ gitGraph
             .expect("Failed to render PDF with Mermaid diagrams");
         let render_dur = render_start.elapsed();
         let avg_secs = render_dur.as_secs_f64() / success_count as f64;
-        eprintln!("Rendered {} diagrams in {:.3?} (avg {:.3}s/diagram)", success_count, render_dur, avg_secs);
+        eprintln!(
+            "Rendered {} diagrams in {:.3?} (avg {:.3}s/diagram)",
+            success_count, render_dur, avg_secs
+        );
 
         println!();
         println!("{}", "=".repeat(70));

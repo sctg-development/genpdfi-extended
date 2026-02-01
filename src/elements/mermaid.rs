@@ -18,7 +18,6 @@ use crate::{Alignment, Position};
 mod inner {
     use std::fmt::Display;
 
-
     use headless_chrome::Browser;
     use unescape::unescape;
 
@@ -642,10 +641,8 @@ mod inner {
                 let mut result = parsed_img.render(context, area, style)?;
                 // Apply scaling factor to the result size
                 if (used_scale - 1.0).abs() >= f32::EPSILON {
-                    result.size = Size::new(
-                        result.size.width,
-                        result.size.height.as_f32() * used_scale,
-                    );
+                    result.size =
+                        Size::new(result.size.width, result.size.height.as_f32() * used_scale);
                 }
                 return Ok(result);
             }
@@ -693,10 +690,7 @@ mod inner {
                     res.svg = Some(sanitized);
                     // Apply scaling factor to the result size
                     if (used_scale - 1.0).abs() >= f32::EPSILON {
-                        res.size = Size::new(
-                            res.size.width,
-                            res.size.height.as_f32() * used_scale,
-                        );
+                        res.size = Size::new(res.size.width, res.size.height.as_f32() * used_scale);
                     }
                     Ok(res)
                 }
