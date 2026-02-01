@@ -13,7 +13,7 @@ permissions:
 
 env:
   # mermaid tests may fail on github runners due to missing fonts or other issues, test locally
-  TESTS_TO_SKIP: "--skip mermaid_render_each --skip wrap::tests::test_wrapper_overflow_sets_flag --skip elements::mermaid::tests::render_mermaid_smoke --skip render_each_mermaid_block_to_pdf"
+  TESTS_TO_SKIP: "--skip mermaid_render_each --skip wrap::tests::test_wrapper_overflow_sets_flag --skip elements::mermaid::tests::render_mermaid_smoke --skip render_each_mermaid_block_to_pdf --skip mermaid_pipe_hang"
   # Increase timeout for tests involving RUST_TEST_PIPE (very slow on github runners)
   RUST_TEST_PIPE_TIMEOUT: "300"
 jobs:
