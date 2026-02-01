@@ -90,6 +90,45 @@ mod inner {
         })
     }
 
+    /// Shutdown and kill any spawned Chrome used by Mermaid rendering. This ensures
+    /// the process doesn't keep child processes or background threads alive which
+    /// can prevent the main program from exiting when its output is piped.
+    pub fn shutdown_browser() -> Result<(), Error> {
+        // If we have a pool tab, try to clear references so it can be dropped.
+        if let Some(tab_arc) = POOL_TAB.get() {
+            let _ = tab_arc.clone(); // ensure we at least hold a clone so dropping our clone reduces refs
+        }
+
+        // If there is a running Browser, try to obtain its process id and kill it.
+        if let Some(browser) = BROWSER.get() {
+            if let Some(pid) = browser.get_process_id() {
+                // Try gentle TERM then KILL if needed
+                let _ = std::process::Command::new("sh")
+                    .arg("-c")
+                    .arg(format!("kill -TERM {} 2>/dev/null || true", pid))
+                    .status();
+
+                // Wait for process to disappear (poll)
+                let mut tries = 0u32;
+                while tries < 50 {
+                    let still = std::process::Command::new("sh")
+                        .arg("-c")
+                        .arg(format!("ps -p {} -o pid= || true", pid))
+                        .output();
+                    if let Ok(o) = still {
+                        if o.stdout.is_empty() {
+                            break;
+                        }
+                    }
+                    tries += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(100));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     // Path to the embedded helper HTML file written to a temp location and reused.
     use headless_chrome::Tab;
     use std::sync::Arc;
@@ -806,6 +845,14 @@ impl Mermaid {
     /// browser in integration tests or examples.
     pub fn get_browser() -> Result<&'static headless_chrome::Browser, crate::error::Error> {
         inner::get_browser()
+    }
+
+    /// Shutdown the shared headless Chrome instance used by Mermaid rendering.
+    ///
+    /// This calls into the inner helper to drop the global Browser and waits
+    /// briefly for chrome processes to exit so shells/pipelines receive EOF.
+    pub fn shutdown_browser() -> Result<(), crate::error::Error> {
+        inner::shutdown_browser()
     }
 
     /// Set alignment used when no absolute position is given.

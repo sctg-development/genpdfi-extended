@@ -272,5 +272,11 @@ gitGraph
         println!("{}", "=".repeat(70));
         println!();
         println!("Results:  Successful: {}", success_count);
+
+        // Ensure we shutdown/cleanup the shared browser to avoid leaving child
+        // processes or threads alive that can keep shells/pipes open in CI.
+        if let Err(e) = elements::Mermaid::shutdown_browser() {
+            eprintln!("Warning: failed to shutdown mermaid browser: {}", e);
+        }
     }
 }
