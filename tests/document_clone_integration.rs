@@ -1,11 +1,20 @@
-use genpdfi_extended::{Document, elements, fonts, SimplePageDecorator, Margins};
+use genpdfi_extended::{elements, fonts, Document, Margins, SimplePageDecorator};
 
 #[test]
 fn integration_document_clone_independent_render() {
     // Load bundled font
-    let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+    let data = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/fonts/NotoSans-Regular.ttf"
+    ))
+    .to_vec();
     let fd = fonts::FontData::new(data, None).expect("font data");
-    let family = fonts::FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+    let family = fonts::FontFamily {
+        regular: fd.clone(),
+        bold: fd.clone(),
+        italic: fd.clone(),
+        bold_italic: fd.clone(),
+    };
 
     // Create doc and add content
     let mut doc = Document::new(family);
@@ -24,16 +33,31 @@ fn integration_document_clone_independent_render() {
     assert!(!out_orig.is_empty(), "original output must not be empty");
     assert!(!out_clone.is_empty(), "clone output must not be empty");
     // They should not be identical and original should contain at least as much content
-    assert_ne!(out_orig, out_clone, "render outputs should differ after mutating original");
-    assert!(out_orig.len() >= out_clone.len(), "original should be same or larger after adding content");
+    assert_ne!(
+        out_orig, out_clone,
+        "render outputs should differ after mutating original"
+    );
+    assert!(
+        out_orig.len() >= out_clone.len(),
+        "original should be same or larger after adding content"
+    );
 }
 
 #[test]
 fn integration_document_clone_decorator_header_behavior() {
     // Load bundled font
-    let data = include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/fonts/NotoSans-Regular.ttf")).to_vec();
+    let data = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/fonts/NotoSans-Regular.ttf"
+    ))
+    .to_vec();
     let fd = fonts::FontData::new(data, None).expect("font data");
-    let family = fonts::FontFamily { regular: fd.clone(), bold: fd.clone(), italic: fd.clone(), bold_italic: fd.clone() };
+    let family = fonts::FontFamily {
+        regular: fd.clone(),
+        bold: fd.clone(),
+        italic: fd.clone(),
+        bold_italic: fd.clone(),
+    };
 
     // Create a decorator with margins and a header callback
     let mut dec = SimplePageDecorator::new();
@@ -58,5 +82,8 @@ fn integration_document_clone_decorator_header_behavior() {
 
     // The original had a header callback; the clone's decorator should have preserved margins
     // but dropped the header callback, so the original output should be larger.
-    assert!(out_orig.len() > out_clone.len(), "original with header should be larger than clone without header");
+    assert!(
+        out_orig.len() > out_clone.len(),
+        "original with header should be larger than clone without header"
+    );
 }
