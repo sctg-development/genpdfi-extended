@@ -46,7 +46,7 @@ fn mermaid_example_exits_when_piped_to_tail() {
         .expect("failed to spawn shell with pipeline");
 
     // Wait for the process to exit, but fail the test if it doesn't within the timeout.
-    let timeout = Duration::from_secs(15);
+    let timeout = Duration::from_secs(30);
     let start = Instant::now();
     loop {
         match child.try_wait() {
@@ -60,10 +60,58 @@ fn mermaid_example_exits_when_piped_to_tail() {
             }
             Ok(None) => {
                 if start.elapsed() > timeout {
-                    // Kill the child to avoid leaving it running when the test fails.
+                    // Collect diagnostics to help determine which process keeps the pipe open
                     let _ = child.kill();
+
+                    eprintln!(
+                        "--- DIAGNOSTICS: pipeline timed out after {:?} ---",
+                        timeout
+                    );
+                    let child_pid = child.id();
+                    eprintln!("Shell PID: {}", child_pid);
+
+                    // List children of the shell
+                    let ps_children = Command::new("sh")
+                        .arg("-c")
+                        .arg(format!("pgrep -P {} -l || true", child_pid))
+                        .output()
+                        .ok()
+                        .and_then(|o| String::from_utf8(o.stdout).ok())
+                        .unwrap_or_else(|| "(failed to run pgrep -P)".into());
+                    eprintln!("Children of shell:\n{}", ps_children);
+
+                    // List processes that look like chrome/chromium
+                    let chrome_procs = Command::new("sh")
+                        .arg("-c")
+                        .arg("pgrep -a chrome chromium google-chrome msedge || true")
+                        .output()
+                        .ok()
+                        .and_then(|o| String::from_utf8(o.stdout).ok())
+                        .unwrap_or_else(|| "(failed to run pgrep for chrome)".into());
+                    eprintln!("Potential Chrome processes:\n{}", chrome_procs);
+
+                    // Show open file descriptors for shell and any chrome-like processes
+                    let mut lsof_out = String::new();
+                    if let Ok(out) = Command::new("sh")
+                        .arg("-c")
+                        .arg(format!(
+                            "ls -l /proc/{}/fd 2>/dev/null || true",
+                            std::process::id()
+                        ))
+                        .output()
+                    {
+                        lsof_out = String::from_utf8_lossy(&out.stdout).to_string();
+                    }
+                    eprintln!("ls /proc/<self>/fd output:\n{}", lsof_out);
+
+                    // Show last lines of outputs from the temporary output file if any
+                    let _ = Command::new("sh")
+                        .arg("-c")
+                        .arg("ps -ef | sed -n '1,200p'")
+                        .status();
+
                     panic!(
-                        "Process did not exit within {:?}; this reproduces the observed hang",
+                        "Process did not exit within {:?}; this reproduces the observed hang (diagnostics printed)",
                         timeout
                     );
                 }

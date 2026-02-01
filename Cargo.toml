@@ -9,7 +9,7 @@ members = ["."]
 
 [package]
 name = "genpdfi_extended"
-version = "0.6.1"
+version = "0.6.2"
 authors = [
     "Robin Krahl <robin.krahl@ireas.org>",
     "Ismael Sh <me@theiskaa.com>",
@@ -74,6 +74,8 @@ optional = true
 
 [dependencies.headless_chrome]
 version = "1.0.20"
+git = "https://github.com/sctg-development/rust-headless-chrome"
+branch = "pipe-patch"
 optional = true
 features = ["fetch"]
 
@@ -94,6 +96,7 @@ images = [
 ]
 latex = ["microtex_rs"]
 mermaid = ["headless_chrome", "escape_string", "unescape", "images"]
+
 
 [package.metadata.docs.rs]
 all-features = true
