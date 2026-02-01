@@ -1,6 +1,6 @@
 // Copyright (c) 2025 Ismael Theiskaa
 // Copyright (c) 2026 Ronan Le Meillat - SCTG Development
-// 
+//
 // SPDX-License-Identifier: MIT OR Apache-2.0
 // Licensed under the MIT License or the Apache License, Version 2.0
 
@@ -224,6 +224,20 @@ impl FontCache {
     /// [`Font`]: struct.Font.html
     pub fn get_rt_font(&self, font: Font) -> &rusttype::Font<'static> {
         &self.fonts[font.idx].rt_font
+    }
+}
+
+impl Clone for FontCache {
+    /// Clone the font cache. Note that the embedded PDF font references are not cloned
+    /// because they are renderer-specific; `pdf_fonts` and `embedded_font_cache` are
+    /// reset in the clone. The font data itself is cloned (and shared where possible).
+    fn clone(&self) -> Self {
+        FontCache {
+            fonts: self.fonts.clone(),
+            pdf_fonts: Vec::new(),
+            default_font_family: self.default_font_family,
+            embedded_font_cache: HashMap::new(),
+        }
     }
 }
 

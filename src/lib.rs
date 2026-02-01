@@ -490,7 +490,34 @@ impl Document {
             modification_date: None,
         }
     }
+}
 
+impl Clone for Document {
+    /// Deep-clone a `Document` including its element tree, style and font cache.
+    ///
+    /// Notes and guarantees:
+    /// - The font cache is cloned so the cloned document has its own independent cache.
+    /// - Renderer-specific cached PDF fonts (`FontCache::pdf_fonts`) are cleared in the clone and
+    ///   will be re-embedded on the first render call.
+    /// - Page decorators are cloned if possible. Some decorator state such as header callbacks
+    ///   (boxed closures) is not clonable; the provided `SimplePageDecorator::clone_for_document`
+    ///   ensures margins are preserved while header callbacks are dropped in the clone.
+    fn clone(&self) -> Document {
+        Document {
+            root: self.root.clone(),
+            title: self.title.clone(),
+            context: self.context.clone(),
+            style: self.style.clone(),
+            paper_size: self.paper_size,
+            decorator: self.decorator.as_ref().map(|d| d.clone()),
+            conformance: self.conformance.clone(),
+            creation_date: self.creation_date.clone(),
+            modification_date: self.modification_date.clone(),
+        }
+    }
+}
+
+impl Document {
     /// Adds the given font family to the font cache for this document and returns a reference to
     /// it.
     ///
@@ -705,6 +732,31 @@ pub struct RenderResult {
     pub svg: Option<String>,
 }
 
+/// A helper trait to make `PageDecorator` objects cloneable as trait objects.
+///
+/// This is implemented automatically for any `T` that implements `PageDecorator + Clone`.
+/// It provides a `clone_box` method used to clone boxed decorators.
+pub trait PageDecoratorClone {
+    /// Clone the boxed decorator into a new boxed trait object.
+    fn clone_box(&self) -> Box<dyn PageDecorator>;
+}
+
+impl<T> PageDecoratorClone for T
+where
+    T: PageDecorator + Clone + 'static,
+{
+    fn clone_box(&self) -> Box<dyn PageDecorator> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Box<dyn PageDecorator> {
+    fn clone(&self) -> Box<dyn PageDecorator> {
+        // delegate to the clone_box implementation
+        self.as_ref().clone_box()
+    }
+}
+
 /// Prepares a page of a document.
 ///
 /// If you set an implementation of this trait for a [`Document`][] using the
@@ -716,7 +768,7 @@ pub struct RenderResult {
 /// [`set_page_decorator`]: struct.Document.html#method.set_page_decorator
 /// [`SimplePageDecorator`]: struct.SimplePageDecorator.html
 /// [`decorate_page`]: #tymethod.decorate_page
-pub trait PageDecorator {
+pub trait PageDecorator: PageDecoratorClone {
     /// Prepares the page with the given area before it is filled with the document content and
     /// returns the writable area of the page.
     ///
@@ -753,6 +805,19 @@ impl SimplePageDecorator {
         SimplePageDecorator::default()
     }
 
+    /// Returns a clone of this decorator suitable for attaching to another `Document`.
+    ///
+    /// Note: the header callback is not cloned (it is set to `None` on the clone) because
+    /// boxed closures are not universally cloneable. This preserves the margins and resets
+    /// the page counter to 0 for the cloned instance.
+    pub fn clone_for_document(&self) -> SimplePageDecorator {
+        SimplePageDecorator {
+            page: 0,
+            margins: self.margins,
+            header_cb: None,
+        }
+    }
+
     /// Sets the margins for all pages of this document.
     ///
     /// If this method is not called, the full page is used.
@@ -773,8 +838,18 @@ impl SimplePageDecorator {
         // We manually box the return type of the callback so that it is easier to write closures.
         self.header_cb = Some(Box::new(move |page| Box::new(cb(page))));
     }
+
+    /// Return the margins currently configured for this decorator (useful for testing).
+    pub fn margins(&self) -> Option<Margins> {
+        self.margins
+    }
 }
 
+impl Clone for SimplePageDecorator {
+    fn clone(&self) -> Self {
+        self.clone_for_document()
+    }
+}
 impl PageDecorator for SimplePageDecorator {
     fn decorate_page<'a>(
         &mut self,
@@ -795,6 +870,30 @@ impl PageDecorator for SimplePageDecorator {
     }
 }
 
+/// A helper trait to make `Element` objects cloneable as trait objects.
+///
+/// Types that implement `Element` and `Clone` will automatically get an implementation of
+/// `ElementClone` which allows cloning boxed elements via `clone_box`.
+pub trait ElementClone {
+    /// Clone this element into a boxed trait object.
+    fn clone_box(&self) -> Box<dyn Element>;
+}
+
+impl<T> ElementClone for T
+where
+    T: Element + Clone + 'static,
+{
+    fn clone_box(&self) -> Box<dyn Element> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Box<dyn Element> {
+    fn clone(&self) -> Box<dyn Element> {
+        self.as_ref().clone_box()
+    }
+}
+
 /// An element of a PDF document.
 ///
 /// This trait is implemented by all elements that can be added to a [`Document`][].  Implementors
@@ -806,7 +905,7 @@ impl PageDecorator for SimplePageDecorator {
 ///
 /// [`Document`]: struct.Document.html
 /// [`render`]: #tymethod.render
-pub trait Element {
+pub trait Element: ElementClone {
     /// Renders this element to the given area using the given style and font cache.
     ///
     /// For an overview over the rendering process, see the [Rendering Process section of the crate
@@ -889,6 +988,24 @@ pub struct Context {
     pub hyphenator: Option<hyphenation::Standard>,
 }
 
+impl Clone for Context {
+    fn clone(&self) -> Context {
+        #[cfg(feature = "hyphenation")]
+        {
+            Context {
+                font_cache: self.font_cache.clone(),
+                hyphenator: self.hyphenator.clone(),
+            }
+        }
+
+        #[cfg(not(feature = "hyphenation"))]
+        {
+            Context {
+                font_cache: self.font_cache.clone(),
+            }
+        }
+    }
+}
 impl Context {
     #[cfg(not(feature = "hyphenation"))]
     fn new(font_cache: fonts::FontCache) -> Context {
@@ -973,5 +1090,56 @@ mod tests {
         assert_eq!(pos, Position::new(Mm(10.0), Mm(20.0)));
         let sz: Size = (80.0f32, 200.0f32).into();
         assert_eq!(sz.width, Mm(80.0));
+    }
+
+    #[test]
+    fn test_simple_page_decorator_clone_preserves_margins() {
+        use super::{Margins, SimplePageDecorator};
+        let mut dec = SimplePageDecorator::new();
+        dec.set_margins(Margins::from(12.0));
+        dec.set_header(|_| crate::elements::Paragraph::new("hd"));
+        let dec_clone = dec.clone();
+        assert_eq!(dec_clone.margins(), dec.margins());
+    }
+
+    #[test]
+    fn test_document_clone_independent_render() {
+        use crate::elements::Paragraph;
+        use crate::fonts;
+        use crate::Document;
+
+        // Create font family using bundled font
+        let data = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/fonts/NotoSans-Regular.ttf"
+        ))
+        .to_vec();
+        let fd = fonts::FontData::new(data, None).expect("font data");
+        let family = fonts::FontFamily {
+            regular: fd.clone(),
+            bold: fd.clone(),
+            italic: fd.clone(),
+            bold_italic: fd.clone(),
+        };
+
+        let mut doc = Document::new(family);
+        doc.push(Paragraph::new("First"));
+
+        // Clone document
+        let mut doc_clone = doc.clone();
+
+        // Mutate original
+        doc.push(Paragraph::new("Second"));
+
+        // Render both, ensure both produce non-empty output independently
+        let mut out1 = Vec::new();
+        let _ = doc.render(&mut out1).expect("render original");
+        let mut out2 = Vec::new();
+        let _ = doc_clone.render(&mut out2).expect("render clone");
+
+        assert!(!out1.is_empty());
+        assert!(!out2.is_empty());
+        // original has more content -> likely larger PDF
+        assert!(out1.len() >= out2.len());
     }
 }

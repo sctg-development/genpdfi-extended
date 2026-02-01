@@ -118,6 +118,14 @@ pub struct LinearLayout {
     render_idx: usize,
 }
 
+impl Clone for LinearLayout {
+    fn clone(&self) -> Self {
+        LinearLayout {
+            elements: self.elements.clone(), // Box<dyn Element> is cloneable via clone_box
+            render_idx: 0,                   // reset rendering state for the cloned layout
+        }
+    }
+}
 impl LinearLayout {
     fn new() -> LinearLayout {
         LinearLayout {
@@ -317,6 +325,7 @@ mod tests {
         use crate::fonts::{FontCache, FontData, FontFamily};
         use crate::Context;
 
+        #[derive(Clone)]
         struct MoreElement;
         impl Element for MoreElement {
             fn render(
@@ -1249,7 +1258,7 @@ impl<E: Element> PaddedElement<E> {
     }
 }
 
-impl<E: Element> Element for PaddedElement<E> {
+impl<E: Element + Clone + 'static> Element for PaddedElement<E> {
     fn render(
         &mut self,
         context: &Context,
@@ -1304,7 +1313,7 @@ impl<E: Element> StyledElement<E> {
     }
 }
 
-impl<E: Element> Element for StyledElement<E> {
+impl<E: Element + Clone + 'static> Element for StyledElement<E> {
     fn render(
         &mut self,
         context: &Context,
@@ -1359,7 +1368,7 @@ impl<E: Element> FramedElement<E> {
     }
 }
 
-impl<E: Element> Element for FramedElement<E> {
+impl<E: Element + Clone + 'static> Element for FramedElement<E> {
     fn render(
         &mut self,
         context: &Context,
@@ -1476,6 +1485,7 @@ impl<E: Element> Element for FramedElement<E> {
 /// ```
 ///
 /// [`LinearLayout`]: struct.LinearLayout.html
+#[derive(Clone)]
 pub struct UnorderedList {
     layout: LinearLayout,
     bullet: Option<String>,
@@ -1499,7 +1509,7 @@ impl UnorderedList {
     }
 
     /// Adds an element to this list.
-    pub fn push<E: Element + 'static>(&mut self, element: E) {
+    pub fn push<E: Element + Clone + 'static>(&mut self, element: E) {
         let mut point = BulletPoint::new(element);
         if let Some(bullet) = &self.bullet {
             point.set_bullet(bullet.clone());
@@ -1508,7 +1518,7 @@ impl UnorderedList {
     }
 
     /// Adds an element to this list and returns the list.
-    pub fn element<E: Element + 'static>(mut self, element: E) -> Self {
+    pub fn element<E: Element + Clone + 'static>(mut self, element: E) -> Self {
         self.push(element);
         self
     }
@@ -1531,7 +1541,7 @@ impl Default for UnorderedList {
     }
 }
 
-impl<E: Element + 'static> iter::Extend<E> for UnorderedList {
+impl<E: Element + Clone + 'static> iter::Extend<E> for UnorderedList {
     fn extend<I: IntoIterator<Item = E>>(&mut self, iter: I) {
         for element in iter {
             self.push(element);
@@ -1539,7 +1549,7 @@ impl<E: Element + 'static> iter::Extend<E> for UnorderedList {
     }
 }
 
-impl<E: Element + 'static> iter::FromIterator<E> for UnorderedList {
+impl<E: Element + Clone + 'static> iter::FromIterator<E> for UnorderedList {
     fn from_iter<I: IntoIterator<Item = E>>(iter: I) -> Self {
         let mut list = Self::default();
         list.extend(iter);
@@ -1598,6 +1608,7 @@ impl<E: Element + 'static> iter::FromIterator<E> for UnorderedList {
 /// ```
 ///
 /// [`LinearLayout`]: struct.LinearLayout.html
+#[derive(Clone)]
 pub struct OrderedList {
     layout: LinearLayout,
     number: usize,
@@ -1618,7 +1629,7 @@ impl OrderedList {
     }
 
     /// Adds an element to this list.
-    pub fn push<E: Element + 'static>(&mut self, element: E) {
+    pub fn push<E: Element + Clone + 'static>(&mut self, element: E) {
         let mut point = BulletPoint::new(element);
         point.set_bullet(format!("{}.", self.number));
         self.layout.push(point);
@@ -1626,7 +1637,7 @@ impl OrderedList {
     }
 
     /// Adds an element to this list and returns the list.
-    pub fn element<E: Element + 'static>(mut self, element: E) -> Self {
+    pub fn element<E: Element + Clone + 'static>(mut self, element: E) -> Self {
         self.push(element);
         self
     }
@@ -1649,7 +1660,7 @@ impl Default for OrderedList {
     }
 }
 
-impl<E: Element + 'static> iter::Extend<E> for OrderedList {
+impl<E: Element + Clone + 'static> iter::Extend<E> for OrderedList {
     fn extend<I: IntoIterator<Item = E>>(&mut self, iter: I) {
         for element in iter {
             self.push(element);
@@ -1657,7 +1668,7 @@ impl<E: Element + 'static> iter::Extend<E> for OrderedList {
     }
 }
 
-impl<E: Element + 'static> iter::FromIterator<E> for OrderedList {
+impl<E: Element + Clone + 'static> iter::FromIterator<E> for OrderedList {
     fn from_iter<I: IntoIterator<Item = E>>(iter: I) -> Self {
         let mut list = Self::default();
         list.extend(iter);
@@ -1683,6 +1694,7 @@ impl<E: Element + 'static> iter::FromIterator<E> for OrderedList {
 ///
 /// [`OrderedList`]: struct.OrderedList.html
 /// [`UnorderedList`]: struct.UnorderedList.html
+#[derive(Clone)]
 pub struct BulletPoint<E: Element> {
     element: E,
     indent: Mm,
@@ -1715,7 +1727,7 @@ impl<E: Element> BulletPoint<E> {
     }
 }
 
-impl<E: Element> Element for BulletPoint<E> {
+impl<E: Element + Clone + 'static> Element for BulletPoint<E> {
     fn render(
         &mut self,
         context: &Context,
@@ -1745,7 +1757,7 @@ impl<E: Element> Element for BulletPoint<E> {
 /// Implementations of this trait can be used to style cells of a [`TableLayout`][].
 ///
 /// [`TableLayout`]: struct.TableLayout.html
-pub trait CellDecorator {
+pub trait CellDecorator: CellDecoratorClone {
     /// Sets the size of the table.
     ///
     /// This function is called once before the first call to [`prepare_cell`][] or
@@ -1778,6 +1790,31 @@ pub trait CellDecorator {
         area: render::Area<'_>,
         row_height: Mm,
     ) -> Mm;
+}
+
+/// A helper trait to make `CellDecorator` objects cloneable as trait objects.
+///
+/// This is implemented automatically for any `T` that implements `CellDecorator + Clone`.
+/// It provides a `clone_box` method used to clone boxed decorators.
+pub trait CellDecoratorClone {
+    /// Clone the boxed decorator into a new boxed trait object.
+    fn clone_box(&self) -> Box<dyn CellDecorator>;
+}
+
+impl<T> CellDecoratorClone for T
+where
+    T: CellDecorator + Clone + 'static,
+{
+    fn clone_box(&self) -> Box<dyn CellDecorator> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Box<dyn CellDecorator> {
+    fn clone(&self) -> Box<dyn CellDecorator> {
+        // delegate to the clone_box implementation
+        self.as_ref().clone_box()
+    }
 }
 
 /// A cell decorator that draws frames around table cells.
@@ -2143,6 +2180,7 @@ impl<'a, E: IntoBoxedElement> iter::Extend<E> for TableLayoutRow<'a> {
 ///
 /// [`CellDecorator`]: trait.CellDecorator.html
 /// [`FrameCellDecorator`]: struct.FrameCellDecorator.html
+#[derive(Clone)]
 pub struct TableLayout {
     column_weights: Vec<usize>,
     rows: Vec<Vec<Box<dyn Element>>>,
