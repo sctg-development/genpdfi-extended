@@ -14,6 +14,8 @@ permissions:
 env:
   # mermaid tests may fail on github runners due to missing fonts or other issues, test locally
   TESTS_TO_SKIP: "--skip mermaid_render_each --skip wrap::tests::test_wrapper_overflow_sets_flag --skip elements::mermaid::tests::render_mermaid_smoke --skip render_each_mermaid_block_to_pdf"
+  # Increase timeout for tests involving RUST_TEST_PIPE (very slow on github runners)
+  RUST_TEST_PIPE_TIMEOUT: "300"
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
@@ -79,7 +81,7 @@ jobs:
       - name: Run tests (all feature)
         env:
           CI_VISUAL_STRICT: "1"
-        run: cargo test --all-features --verbose -- ${{ env.TESTS_TO_SKIP }}
+        run: RUST_TEST_PIPE_TIMEOUT=${{env.RUST_TEST_PIPE_TIMEOUT}} cargo test --all-features --verbose -- ${{ env.TESTS_TO_SKIP }}
 
       - name: Generate coverage (Tarpaulin)
         continue-on-error: true

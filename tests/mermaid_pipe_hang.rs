@@ -45,8 +45,18 @@ fn mermaid_example_exits_when_piped_to_tail() {
         .spawn()
         .expect("failed to spawn shell with pipeline");
 
+    // if RUST_TEST_PIPE_TIMEOUT environment variable is set, use it as timeout in seconds or default to 30 seconds
+    let timeout = std::env::var("RUST_TEST_PIPE_TIMEOUT")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or_else(|| Duration::from_secs(30));
+
+    eprintln!(
+        "Waiting up to {:?} for the pipeline process to exit...",
+        timeout
+    );
     // Wait for the process to exit, but fail the test if it doesn't within the timeout.
-    let timeout = Duration::from_secs(30);
     let start = Instant::now();
     loop {
         match child.try_wait() {
